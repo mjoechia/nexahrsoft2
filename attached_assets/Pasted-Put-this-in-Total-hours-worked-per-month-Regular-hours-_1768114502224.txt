@@ -1,54 +1,0 @@
-Put this in
-* Total hours worked per month
-* Regular hours vs overtime hours
-* Basic pay based on hourly/daily/monthly rate
-
-Add in 
-1. CPF (20% of salary) from employee salary
-2. Employer portion of CPF
-
-Study and adapt these cpf rules
-
-📌 1. Who Must Get CPF Contributions
-Your employer must pay CPF for you if all of these apply: ✅ You are a Singapore Citizen (SC) or Singapore Permanent Resident (SPR) ✅ You are employed in Singapore under a contract of service (full-time, part-time, temporary, casual) ✅ You earn total wages of more than S$50 per month If wages are S$50–S$500, only the employer pays CPF — no employee share deducted. (Central Provident Fund)
-❌ Not eligible for CPF contributions: • Foreigners (e.g., Employment Pass, S Pass, Work Permit holders) • Domestic helpers working ≤14 hours/week • Certain UN employees and some seafarers • Students in eligible programs when exempted (Central Provident Fund)
-
-📌 2. Employer & Employee Contributions
-CPF contributions are made by the employer on behalf of you (employee) — and the employer pays both shares to the CPF Board each month. They are allowed to recover the employee’s share by deducting it from your wages. (Ministry of Manpower Singapore)
-📊 Typical Contribution Rates (from 1 Jan 2026)
-These are approximate combined employer + employee portions based on age (for monthly wages > S$750):
-Age Group	Employer Share	Employee Share	Total CPF
-55 & below	17%	20%	37%
-Above 55 to 60	16%	18%	34%
-Above 60 to 65	12.5%	12.5%	25%
-Above 65 to 70	9%	7.5%	16.5%
-Above 70	7.5%	5%	12.5%
-Rates vary for SPRs in their first 2 years of PR status — lower graduated rates initially apply unless both employer and employee opt to contribute at full rates. (Central Provident Fund)
-For wages between S$500–S$750, employee CPF contributions are phased in. (Central Provident Fund)
-
-🪙 3. Wage Types Subject to CPF
-CPF contributions are based on Total Wages, which includes: • Basic salary • Overtime • Allowances (e.g., transport, commission) • Bonuses and incentives (Central Provident Fund)
-
-🗓 4. When CPF Must Be Paid
-• CPF contributions are due by the last day of each month. • Employers have a small grace period: if not paid by the deadline, interest and penalties apply (late interest at ~1.5%/month). (Central Provident Fund)
-Failing to pay CPF on time can result in:
-* Interest on late amounts
-* Fines
-* Possible prosecution or jail for serious breaches (Ministry of Manpower Singapore)
-
-📊 5. Salary Ceilings
-CPF applies up to certain limits: ✔ Monthly Ordinary Wage Ceiling — up to S$8,000 (from 2026) ✔ Annual Wage Ceiling — S$102,000 (combined ordinary + additional wages) (Central Provident Fund)
-That means CPF is not required on the portion of wages above those ceilings.
-
-🧠 6. Key Practical Points
-Can employers deduct CPF from pay? Yes — employer pays both shares but can recover the employee share as a deduction from your wages. (Ministry of Manpower Singapore)
-Part-time / casual workers? As long as the worker is an SC/SPR and earns > S$50/month, CPF must be paid — even for part-timers. (Central Provident Fund)
-Self-employed? If you’re self-employed (not under a contract of service), you don’t pay traditional CPF but may have mandatory MediSave contributions under a separate scheme. (Central Provident Fund)
-
-📌 Summary
-Rule	Requirement
-Eligibility	SC or SPR, employed in Singapore, wages > S$50
-Employer must pay	Both employer + employee CPF contributions monthly
-Employee may see deduction	Yes — employee share deducted from salary
-Rates	Vary by age and PR status, ~37% total for most under 55
-Deadlines	End of month + grace period; late pay = penalties

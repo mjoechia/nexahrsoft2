@@ -1,52 +1,0 @@
-Check CPF calculations, its wrong for Tulasi Dass S/o Jayaram Govindasamy
-
-Understood 👍 Below is exactly what you need, in two clear sections, and written in a way a developer can implement without ambiguity.
-
-1️⃣ Corrected CPF Numbers (for this employee / Dec 2025)
-Employee DOB: 22 Dec 1962 Wage month: Dec 2025 Age at end of month: 63 CPF age band: >60 to ≤65 CPF-liable wages: $4,040.00
-✅ Correct CPF contributions
-* Employee CPF: $464
-* Employer CPF: $485
-* Total CPF: $949
-❌ Previous payroll was wrong because it used 25% (12.5% + 12.5%), which applies only from Jan 2026 onward, not Dec 2025 wages.
-
-2️⃣ CPF Calculation Logic (ALL age bands + rounding rules)
-This is the full CPF logic to implement.
-
-A. Determine age for CPF
-age = employee age at end of wage month
-Always use wage month, not payment date.
-
-B. Select CPF rates (Dec 2025 wages)
-Age at month end	Employee rate	Employer rate	Total
-≤ 55	20.0%	17.0%	37.0%
->55 to ≤60	15.0%	14.0%	29.0%
->60 to ≤65	11.5%	12.0%	23.5%
->65 to ≤70	8.5%	9.0%	17.5%
->70	7.5%	7.5%	15.0%
-(This table is for wages earned up to Dec 2025.)
-
-C. Determine CPF-liable wages
-cpf_wages = min(total_earnings, CPF_monthly_wage_ceiling)
-* Dec 2025 ceiling: $8,000
-
-D. CPF calculation (MANDATORY rounding logic)
-employee_cpf = floor(cpf_wages × employee_rate)
-employer_cpf = ceil (cpf_wages × employer_rate)
-total_cpf    = employee_cpf + employer_cpf
-❗ Important
-* Do not round total CPF
-* Do not split total CPF by percentage
-* Always round employee down, employer up
-
-E. Worked example (this case)
-employee_cpf = floor(4,040 × 0.115) = 464
-employer_cpf = ceil (4,040 × 0.120) = 485
-total_cpf    = 949
-
-F. System validation rule (strongly recommended)
-IF total_cpf ≠ employee_cpf + employer_cpf:
-    FAIL payroll run
-
-One-line developer summary
-CPF is calculated based on employee age at end of wage month and wage month CPF rates. CPF-liable wages are capped at the monthly ceiling. Employee CPF is rounded down, employer CPF rounded up, and total CPF is the sum of both.

@@ -1,0 +1,10 @@
+dist/
+node_modules/
+attached_assets/
+*.pdf
+*.csv
+*.xls
+*.xlsx
+attendance_*.png
+database_dump.sql
+notes.md

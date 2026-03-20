@@ -173,7 +173,7 @@ async function serverReverseGeocode(lat: string, lng: string): Promise<string> {
 // Admin credentials
 const ADMIN_CREDENTIALS = {
   username: "nexaadmin",
-  password: "nexa123!",
+  password: "jc123!",
 };
 
 // Super admin emails - only these users can archive/unarchive employees
@@ -1535,7 +1535,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      const { user, auditLogs } = await storage.updateEmployeePayrollSettings(id, updates, changedBy);
+      const { user, auditLogs } = await storage.updateEmployeePayrollSettings(id, updates as any, changedBy);
       
       if (!user) {
         return res.status(404).json({ message: "Employee not found" });
@@ -1552,12 +1552,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const allowanceMapping: Record<string, { from: string; to: string }> = {
             defaultMobileAllowance: { from: 'defaultMobileAllowance', to: 'mobileAllowance' },
             defaultTransportAllowance: { from: 'defaultTransportAllowance', to: 'transportAllowance' },
-            defaultMealAllowance: { from: 'defaultMealAllowance', to: 'loanRepaymentTotal' },
+            defaultMealAllowance: { from: 'defaultMealAllowance', to: 'mealAllowance' },
             defaultShiftAllowance: { from: 'defaultShiftAllowance', to: 'shiftAllowance' },
             defaultOtherAllowance: { from: 'defaultOtherAllowance', to: 'otherAllowance' },
             defaultHouseRentalAllowance: { from: 'defaultHouseRentalAllowance', to: 'houseRentalAllowances' },
           };
-          
+
           for (const existingRecord of allRecords) {
             const payslipUpdates: Record<string, any> = {};
             const changes: { field: string; oldValue: number; newValue: number }[] = [];
@@ -1607,7 +1607,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             const totRestPhAmount = parseNumeric(mergedRecord.totRestPhAmount);
             const mobileAllowance = parseNumeric(mergedRecord.mobileAllowance);
             const transportAllowance = parseNumeric(mergedRecord.transportAllowance);
-            const mealAllowance = parseNumeric(mergedRecord.mealAllowance);
+            const mealAllowance = parseNumeric((mergedRecord as any).mealAllowance);
             const annualLeaveEncashment = parseNumeric(mergedRecord.annualLeaveEncashment);
             const serviceCallAllowances = parseNumeric(mergedRecord.serviceCallAllowances);
             const otherAllowance = parseNumeric(mergedRecord.otherAllowance);
@@ -3650,7 +3650,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
         }
         // Refetch after update
-        balances = await storage.getAllLeaveBalances(currentYear);
+        balances = await storage.getAllLeaveBalances(yearFilter);
       }
       
       res.json({ balances });
@@ -3822,7 +3822,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const matchMap = new Map<string, { userId: string; systemName: string; systemCode: string | null }>();
-      for (const [key, emp] of uniqueEmployees) {
+      for (const [key, emp] of Array.from(uniqueEmployees)) {
         let user = usersByCode.get(emp.code);
         if (!user) {
           const importNameLower = emp.name.toLowerCase().trim();
@@ -3939,7 +3939,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         console.log(`[Leave Import] Syncing ${affectedMeta.size} leave balance entries from full history`);
 
-        for (const [, meta] of affectedMeta) {
+        for (const [, meta] of Array.from(affectedMeta)) {
           try {
             // Query ALL leave_history records for this userId/leaveType/year to get accurate total
             const allHistoryForKey = await db.select()
@@ -5174,7 +5174,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const generatedRecords: any[] = [];
-      const skippedEmployees: { employeeCode: string; employeeName: string; reason: string }[] = [];
+      const skippedEmployees: { id?: string; employeeCode: string; employeeName: string; reason: string }[] = [];
 
       for (const employee of employees) {
         // Get this employee's attendance for the month
@@ -5360,11 +5360,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Get default allowances from employee profile
         const mobileAllowance = parseFloat(employee.defaultMobileAllowance || '0');
         const transportAllowance = parseFloat(employee.defaultTransportAllowance || '0');
+        const mealAllowance = parseFloat(employee.defaultMealAllowance || '0');
         const shiftAllowance = parseFloat(employee.defaultShiftAllowance || '0');
         const otherAllowance = parseFloat(employee.defaultOtherAllowance || '0');
         const houseRentalAllowance = parseFloat(employee.defaultHouseRentalAllowance || '0');
-        const loanDeduction = parseFloat(employee.defaultMealAllowance || '0');
-        const totalAllowances = mobileAllowance + transportAllowance + shiftAllowance + otherAllowance + houseRentalAllowance;
+        const loanDeduction = 0; // Loan deductions come from payroll_loan_accounts, not employee settings
+        const totalAllowances = mobileAllowance + transportAllowance + mealAllowance + shiftAllowance + otherAllowance + houseRentalAllowance;
 
         // Calculate gross wages (calculated earnings + OT + allowances)
         const grossWages = calculatedBasicPay + finalOtAmount + totalAllowances;
@@ -5599,6 +5600,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         payType: string;
         hourlyRate: number;
         basicPay: number;
+        ot15Pay?: number;
+        ot20Pay?: number;
         overtimePay: number;
         mobileAllowance: number;
         transportAllowance: number;
@@ -5607,13 +5610,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
         otherAllowance: number;
         houseRentalAllowance: number;
         loanDeduction: number;
+        advance?: number;
+        annualLeaveEncashment?: number;
         salaryAdjustments: number;
         grossWages: number;
         employeeCPF: number;
         employerCPF: number;
         netPay: number;
+        salaryBeforeOT?: number;
+        finalSal?: number;
         residencyStatus: string;
         cpfEligible: boolean;
+        shgFund?: string;
+        shgAmount?: number;
+        sinda?: number;
+        cdac?: number;
+        mbmf?: number;
+        ecf?: number;
       }[] = [];
 
       const skipped: { id: string; employeeCode: string; employeeName: string; reason: string }[] = [];
@@ -5760,14 +5773,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const shiftAllowance = parseFloat(employee.defaultShiftAllowance || '0');
         const otherAllowance = parseFloat(employee.defaultOtherAllowance || '0');
         const houseRentalAllowance = parseFloat(employee.defaultHouseRentalAllowance || '0');
-        const loanDeduction = parseFloat(employee.defaultMealAllowance || '0');
-        const totalAllowances = mobileAllowance + transportAllowance + shiftAllowance + otherAllowance + houseRentalAllowance;
+        const loanDeduction = 0; // Loan deductions come from payroll_loan_accounts, not employee settings
+        const totalAllowances = mobileAllowance + transportAllowance + mealAllowance + shiftAllowance + otherAllowance + houseRentalAllowance;
         
         // Calculate salary adjustments (additions/deductions from employee settings)
         const employeeSalaryAdjustments = salaryAdjustmentsMap.get(employee.id) || [];
         let salaryAdjustmentsTotal = 0;
         for (const adj of employeeSalaryAdjustments) {
           const amount = parseFloat(String(adj.amount));
+          if (isNaN(amount)) continue;
           if (adj.adjustmentType === 'addition') {
             salaryAdjustmentsTotal += amount;
           } else if (adj.adjustmentType === 'deduction') {
@@ -5859,7 +5873,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           finalSal: previewFinalSal,
           residencyStatus: residencyStatus || 'NOT_SET',
           cpfEligible: cpfResult.isEligible,
-          shgFund: previewShg.fund,
+          shgFund: previewShg.fund ?? undefined,
           shgAmount: previewShg.contribution,
           sinda: previewShg.fund === 'SINDA' ? previewShg.contribution : 0,
           cdac: previewShg.fund === 'CDAC' ? previewShg.contribution : 0,
@@ -6398,7 +6412,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const allowanceMapping: Record<string, { from: string; to: string }> = {
         defaultMobileAllowance: { from: 'defaultMobileAllowance', to: 'mobileAllowance' },
         defaultTransportAllowance: { from: 'defaultTransportAllowance', to: 'transportAllowance' },
-        defaultMealAllowance: { from: 'defaultMealAllowance', to: 'loanRepaymentTotal' },
+        defaultMealAllowance: { from: 'defaultMealAllowance', to: 'mealAllowance' },
         defaultShiftAllowance: { from: 'defaultShiftAllowance', to: 'shiftAllowance' },
         defaultOtherAllowance: { from: 'defaultOtherAllowance', to: 'otherAllowance' },
         defaultHouseRentalAllowance: { from: 'defaultHouseRentalAllowance', to: 'houseRentalAllowances' },
@@ -6457,7 +6471,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const totRestPhAmount = parseNumeric(mergedRecord.totRestPhAmount);
       const mobileAllowance = parseNumeric(mergedRecord.mobileAllowance);
       const transportAllowance = parseNumeric(mergedRecord.transportAllowance);
-      const mealAllowance = parseNumeric(mergedRecord.mealAllowance);
+      const mealAllowance = parseNumeric((mergedRecord as any).mealAllowance);
       const annualLeaveEncashment = parseNumeric(mergedRecord.annualLeaveEncashment);
       const serviceCallAllowances = parseNumeric(mergedRecord.serviceCallAllowances);
       const otherAllowance = parseNumeric(mergedRecord.otherAllowance);

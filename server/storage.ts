@@ -259,6 +259,21 @@ export class MemStorage implements IStorage {
     };
   }
   
+  // Stub implementations for methods not used in production MemStorage
+  async createPayrollImportBatch(batch: InsertPayrollImportBatch): Promise<PayrollImportBatch> { throw new Error("Not implemented in MemStorage"); }
+  async updatePayrollImportBatch(id: string, updates: Partial<PayrollImportBatch>): Promise<PayrollImportBatch | undefined> { throw new Error("Not implemented in MemStorage"); }
+  async getPayrollImportBatch(id: string): Promise<PayrollImportBatch | undefined> { return undefined; }
+  async getPayrollImportBatches(): Promise<PayrollImportBatch[]> { return []; }
+  async getPayrollImportBatchByPeriod(year: number, month: number): Promise<PayrollImportBatch | undefined> { return undefined; }
+  async createEmployeeDocument(doc: InsertEmployeeDocument): Promise<EmployeeDocument> { throw new Error("Not implemented in MemStorage"); }
+  async getEmployeeDocuments(userId: string): Promise<EmployeeDocument[]> { return []; }
+  async getEmployeeDocument(id: string): Promise<EmployeeDocument | undefined> { return undefined; }
+  async deleteEmployeeDocument(id: string): Promise<void> { }
+  async checkDuplicatePayrollRecord(employeeCode: string, year: number, month: number): Promise<boolean> { return false; }
+  async deleteClaim(id: string): Promise<void> { }
+  async createClaimsAuditLog(log: any): Promise<any> { throw new Error("Not implemented in MemStorage"); }
+  async getClaimsAuditLogs(month?: number, year?: number): Promise<any[]> { return []; }
+
   // Stub implementations for loan methods (MemStorage not used in production)
   async createPayrollLoanAccount(loan: InsertPayrollLoanAccount): Promise<PayrollLoanAccount> {
     throw new Error("Not implemented in MemStorage");
@@ -332,7 +347,7 @@ export class MemStorage implements IStorage {
 
   async createUser(insertUser: Partial<User>): Promise<User> {
     const id = randomUUID();
-    const user: User = { 
+    const user = {
       id,
       name: insertUser.name!,
       email: insertUser.email!,
@@ -365,15 +380,23 @@ export class MemStorage implements IStorage {
       payType: insertUser.payType ?? null,
       regularHoursPerDay: insertUser.regularHoursPerDay ?? 8,
       regularDaysPerWeek: insertUser.regularDaysPerWeek ?? null,
-      defaultMobileAllowance: insertUser.defaultMobileAllowance ?? 0,
-      defaultTransportAllowance: insertUser.defaultTransportAllowance ?? 0,
-      defaultMealAllowance: insertUser.defaultMealAllowance ?? 0,
-      defaultShiftAllowance: insertUser.defaultShiftAllowance ?? 0,
-      defaultOtherAllowance: insertUser.defaultOtherAllowance ?? 0,
-      defaultHouseRentalAllowance: insertUser.defaultHouseRentalAllowance ?? 0,
-      salaryAdjustment: insertUser.salaryAdjustment ?? 0,
+      defaultMobileAllowance: String(insertUser.defaultMobileAllowance ?? 0),
+      defaultTransportAllowance: String(insertUser.defaultTransportAllowance ?? 0),
+      defaultMealAllowance: String(insertUser.defaultMealAllowance ?? 0),
+      defaultShiftAllowance: String(insertUser.defaultShiftAllowance ?? 0),
+      defaultOtherAllowance: String(insertUser.defaultOtherAllowance ?? 0),
+      defaultHouseRentalAllowance: String(insertUser.defaultHouseRentalAllowance ?? 0),
+      salaryAdjustment: String(insertUser.salaryAdjustment ?? 0),
       salaryAdjustmentReason: insertUser.salaryAdjustmentReason ?? null,
-    };
+      weeklyContractHours: insertUser.weeklyContractHours ?? 44,
+      ot15Rate: insertUser.ot15Rate ?? null,
+      ot20Rate: insertUser.ot20Rate ?? null,
+      birthday: insertUser.birthday ?? null,
+      employeeType: insertUser.employeeType ?? null,
+      ethnicity: insertUser.ethnicity ?? null,
+      religion: insertUser.religion ?? null,
+      shgOptOut: insertUser.shgOptOut ?? false,
+    } as User;
     this.users.set(id, user);
     return user;
   }
@@ -2038,9 +2061,9 @@ export class PgStorage implements IStorage {
     // Update the loan's outstanding balance
     const loan = await this.getPayrollLoanAccount(repayment.loanAccountId);
     if (loan) {
-      const newBalance = loan.outstandingBalance - repayment.repaymentAmount;
-      await this.updatePayrollLoanAccount(loan.id, { 
-        outstandingBalance: Math.max(0, newBalance),
+      const newBalance = parseFloat(loan.outstandingBalance as any) - parseFloat(repayment.repaymentAmount as any);
+      await this.updatePayrollLoanAccount(loan.id, {
+        outstandingBalance: String(Math.max(0, newBalance)) as any,
         status: newBalance <= 0 ? "paid_off" : "active"
       });
     }

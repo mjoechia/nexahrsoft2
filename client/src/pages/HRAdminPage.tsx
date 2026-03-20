@@ -21,7 +21,7 @@ export default function HRAdminPage() {
   
   const employees = usersData?.filter(u => u.isApproved && !u.isArchived && u.role !== 'admin') || [];
   const payrollRecords = payrollData?.records || [];
-  const totalPayroll = payrollRecords.reduce((sum, r) => sum + r.nett, 0) / 100;
+  const totalPayroll = payrollRecords.reduce((sum, r) => sum + parseFloat(String(r.nett || 0)), 0) / 100;
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">

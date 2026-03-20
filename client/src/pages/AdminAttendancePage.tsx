@@ -501,11 +501,12 @@ export default function AdminAttendancePage() {
     return Array.from(depts).sort();
   }, [users]);
 
-  // Filter users for heatmap (exclude archived users)
+  // Filter users for heatmap (exclude archived and resigned users)
   const filteredUsers = useMemo(() => {
     return users
       .filter(u => !u.id.includes('admin'))
       .filter(u => !u.isArchived) // Exclude archived users
+      .filter(u => !u.resignDate) // Exclude resigned users
       .filter(u => {
         if (searchQuery) {
           const query = searchQuery.toLowerCase();
@@ -2659,7 +2660,7 @@ export default function AdminAttendancePage() {
                                 };
                                 
                                 const getCellColor = () => {
-                                  if (hasAdjustment && isLeaveAdjustment) return getLeaveColor(leaveCode);
+                                  if (hasAdjustment && isLeaveAdjustment) return getLeaveColor(leaveCode ?? undefined);
                                   if (hasAdjustment && !isLeaveAdjustment) {
                                     const adjTotal = (adjustment?.regularHours || 0) + (adjustment?.otHours || 0);
                                     return getHeatmapColor(adjTotal, false);

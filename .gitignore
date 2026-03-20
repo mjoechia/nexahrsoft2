@@ -5,6 +5,6 @@ server/public
 vite.config.ts.*
 *.tar.gz
 .env
-jcreadme.md
-jconline_architecture.md
+jc/
 *.sql
+storage.md

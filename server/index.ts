@@ -3,23 +3,72 @@ import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
 import { Pool } from "pg";
 import path from "path";
+import { createClient } from "@supabase/supabase-js";
+import { sql } from "drizzle-orm";
+import { db } from "./db";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
+
+// Ensure Supabase Storage buckets exist and clear stale disk-based URLs
+async function ensureStorageBuckets() {
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !supabaseKey) {
+    log("Skipping storage bucket setup — SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY not set");
+    return;
+  }
+  try {
+    const supabase = createClient(supabaseUrl, supabaseKey, { auth: { persistSession: false } });
+
+    const { data: buckets } = await supabase.storage.listBuckets();
+    const bucketIds = buckets?.map((b) => b.id) ?? [];
+
+    if (!bucketIds.includes("nexahrsoft-public")) {
+      const { error } = await supabase.storage.createBucket("nexahrsoft-public", { public: true });
+      if (error) log(`Warning: could not create nexahrsoft-public bucket: ${error.message}`);
+      else log("Created Supabase bucket: nexahrsoft-public (public)");
+    } else {
+      log("Supabase bucket nexahrsoft-public already exists");
+    }
+
+    if (!bucketIds.includes("nexahrsoft-private")) {
+      const { error } = await supabase.storage.createBucket("nexahrsoft-private", { public: false });
+      if (error) log(`Warning: could not create nexahrsoft-private bucket: ${error.message}`);
+      else log("Created Supabase bucket: nexahrsoft-private (private)");
+    } else {
+      log("Supabase bucket nexahrsoft-private already exists");
+    }
+
+    // Clear stale /uploads/... URLs left over from old disk storage era (use Drizzle so schema is correct)
+    await db.execute(sql`
+      UPDATE app_nexahrsoft.company_settings SET
+        logo_url = CASE WHEN logo_url LIKE '/uploads/%' THEN NULL ELSE logo_url END,
+        favicon_url = CASE WHEN favicon_url LIKE '/uploads/%' THEN NULL ELSE favicon_url END,
+        clock_in_logo_url = CASE WHEN clock_in_logo_url LIKE '/uploads/%' THEN NULL ELSE clock_in_logo_url END
+    `);
+    log("Stale disk-based URLs cleared from company_settings");
+  } catch (err: any) {
+    log(`Warning: storage bucket setup failed: ${err.message}`);
+  }
+}
 
 // Startup migration helper - ensures critical tables exist
 async function ensureSchemaMigrations(pool: Pool) {
   console.log("Running schema migrations...");
   try {
+    // Set search_path so all unqualified table references resolve correctly
+    await pool.query(`SET search_path TO app_nexahrsoft, public`);
+
     // Ensure pgcrypto extension is available for gen_random_uuid()
     console.log("Ensuring pgcrypto extension...");
     await pool.query(`CREATE EXTENSION IF NOT EXISTS "pgcrypto"`);
     console.log("pgcrypto extension ready");
-    
+
     // Check if attendance_adjustments table exists
     const tableCheck = await pool.query(`
       SELECT EXISTS (
-        SELECT FROM information_schema.tables 
-        WHERE table_schema = 'public' 
+        SELECT FROM information_schema.tables
+        WHERE table_schema = 'app_nexahrsoft'
         AND table_name = 'attendance_adjustments'
       )
     `);
@@ -66,7 +115,7 @@ async function ensureSchemaMigrations(pool: Pool) {
     const remarksTableCheck = await pool.query(`
       SELECT EXISTS (
         SELECT FROM information_schema.tables 
-        WHERE table_schema = 'public' 
+        WHERE table_schema = 'app_nexahrsoft' 
         AND table_name = 'employee_monthly_remarks'
       )
     `);
@@ -103,7 +152,7 @@ async function ensureSchemaMigrations(pool: Pool) {
     const allowViewCheck = await pool.query(`
       SELECT EXISTS (
         SELECT FROM information_schema.columns 
-        WHERE table_schema = 'public' 
+        WHERE table_schema = 'app_nexahrsoft' 
         AND table_name = 'payroll_records'
         AND column_name = 'allow_employee_view'
       )
@@ -124,7 +173,7 @@ async function ensureSchemaMigrations(pool: Pool) {
     const manualPayslipsCheck = await pool.query(`
       SELECT EXISTS (
         SELECT FROM information_schema.tables 
-        WHERE table_schema = 'public' 
+        WHERE table_schema = 'app_nexahrsoft' 
         AND table_name = 'manual_payslips'
       )
     `);
@@ -179,7 +228,7 @@ async function ensureSchemaMigrations(pool: Pool) {
     const auditLogsCheck = await pool.query(`
       SELECT EXISTS (
         SELECT FROM information_schema.tables 
-        WHERE table_schema = 'public' 
+        WHERE table_schema = 'app_nexahrsoft' 
         AND table_name = 'manual_payslip_audit_logs'
       )
     `);
@@ -208,7 +257,7 @@ async function ensureSchemaMigrations(pool: Pool) {
     const claimsAuditLogCheck = await pool.query(`
       SELECT EXISTS (
         SELECT FROM information_schema.tables 
-        WHERE table_schema = 'public' 
+        WHERE table_schema = 'app_nexahrsoft' 
         AND table_name = 'claims_audit_log'
       )
     `);
@@ -258,7 +307,7 @@ async function ensureSchemaMigrations(pool: Pool) {
     const claimsTableCheck = await pool.query(`
       SELECT EXISTS (
         SELECT FROM information_schema.tables 
-        WHERE table_schema = 'public' 
+        WHERE table_schema = 'app_nexahrsoft' 
         AND table_name = 'claims'
       )
     `);
@@ -463,6 +512,7 @@ declare module 'express-session' {
     isAdmin?: boolean;
     isViewOnlyAdmin?: boolean;
     isAttendanceViewAdmin?: boolean;
+    isEmployeeDataAdmin?: boolean;
     codeVerifier?: string;
   }
 }
@@ -510,6 +560,9 @@ app.use((req, res, next) => {
   // Serve uploaded files (logos, favicons, etc.) as static assets
   const uploadsDir = path.join(process.cwd(), "dist", "public", "uploads");
   app.use("/uploads", express.static(uploadsDir));
+
+  // Ensure Supabase Storage buckets exist and clear stale disk URLs
+  await ensureStorageBuckets();
 
   // Run schema migrations before starting the app
   await ensureSchemaMigrations(sessionPool);

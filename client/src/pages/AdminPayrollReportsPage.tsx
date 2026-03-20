@@ -1334,7 +1334,7 @@ export default function AdminPayrollReportsPage() {
                                   variant="outline"
                                   onClick={() => {
                                     setOtRecord(row);
-                                    const daysPerWeek = row.regularDaysPerWeek || 5;
+                                    const daysPerWeek = (row as any).regularDaysPerWeek || 5;
                                     setOtDaysPerWeek(String(daysPerWeek));
                                     const basicAmt = parseAmount(row.basicSalary);
                                     const dailyRate = (basicAmt * 12) / (daysPerWeek * 52);
