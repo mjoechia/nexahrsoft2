@@ -8,7 +8,7 @@ export default defineConfig({
   out: "./migrations",
   schema: "./shared/schema.ts",
   dialect: "postgresql",
-  schemaFilter: ["app_nexahrsoft"],
+  schemaFilter: ["app_nexahrsoft2"],
   dbCredentials: {
     url: process.env.DATABASE_URL,
   },

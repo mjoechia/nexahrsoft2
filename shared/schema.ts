@@ -3,7 +3,7 @@ import { pgSchema, text, varchar, boolean, timestamp, integer, real, unique, num
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
-const appSchema = pgSchema("app_nexahrsoft");
+const appSchema = pgSchema("app_nexahrsoft2");
 
 export const users = appSchema.table("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

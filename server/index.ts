@@ -41,7 +41,7 @@ async function ensureStorageBuckets() {
 
     // Clear stale /uploads/... URLs left over from old disk storage era (use Drizzle so schema is correct)
     await db.execute(sql`
-      UPDATE app_nexahrsoft.company_settings SET
+      UPDATE app_nexahrsoft2.company_settings SET
         logo_url = CASE WHEN logo_url LIKE '/uploads/%' THEN NULL ELSE logo_url END,
         favicon_url = CASE WHEN favicon_url LIKE '/uploads/%' THEN NULL ELSE favicon_url END,
         clock_in_logo_url = CASE WHEN clock_in_logo_url LIKE '/uploads/%' THEN NULL ELSE clock_in_logo_url END
@@ -57,7 +57,7 @@ async function ensureSchemaMigrations(pool: Pool) {
   console.log("Running schema migrations...");
   try {
     // Set search_path so all unqualified table references resolve correctly
-    await pool.query(`SET search_path TO app_nexahrsoft, public`);
+    await pool.query(`SET search_path TO app_nexahrsoft2, public`);
 
     // Ensure pgcrypto extension is available for gen_random_uuid()
     console.log("Ensuring pgcrypto extension...");
@@ -68,7 +68,7 @@ async function ensureSchemaMigrations(pool: Pool) {
     const tableCheck = await pool.query(`
       SELECT EXISTS (
         SELECT FROM information_schema.tables
-        WHERE table_schema = 'app_nexahrsoft'
+        WHERE table_schema = 'app_nexahrsoft2'
         AND table_name = 'attendance_adjustments'
       )
     `);
@@ -115,7 +115,7 @@ async function ensureSchemaMigrations(pool: Pool) {
     const remarksTableCheck = await pool.query(`
       SELECT EXISTS (
         SELECT FROM information_schema.tables 
-        WHERE table_schema = 'app_nexahrsoft' 
+        WHERE table_schema = 'app_nexahrsoft2' 
         AND table_name = 'employee_monthly_remarks'
       )
     `);
@@ -152,7 +152,7 @@ async function ensureSchemaMigrations(pool: Pool) {
     const allowViewCheck = await pool.query(`
       SELECT EXISTS (
         SELECT FROM information_schema.columns 
-        WHERE table_schema = 'app_nexahrsoft' 
+        WHERE table_schema = 'app_nexahrsoft2' 
         AND table_name = 'payroll_records'
         AND column_name = 'allow_employee_view'
       )
@@ -173,7 +173,7 @@ async function ensureSchemaMigrations(pool: Pool) {
     const manualPayslipsCheck = await pool.query(`
       SELECT EXISTS (
         SELECT FROM information_schema.tables 
-        WHERE table_schema = 'app_nexahrsoft' 
+        WHERE table_schema = 'app_nexahrsoft2' 
         AND table_name = 'manual_payslips'
       )
     `);
@@ -228,7 +228,7 @@ async function ensureSchemaMigrations(pool: Pool) {
     const auditLogsCheck = await pool.query(`
       SELECT EXISTS (
         SELECT FROM information_schema.tables 
-        WHERE table_schema = 'app_nexahrsoft' 
+        WHERE table_schema = 'app_nexahrsoft2' 
         AND table_name = 'manual_payslip_audit_logs'
       )
     `);
@@ -257,7 +257,7 @@ async function ensureSchemaMigrations(pool: Pool) {
     const claimsAuditLogCheck = await pool.query(`
       SELECT EXISTS (
         SELECT FROM information_schema.tables 
-        WHERE table_schema = 'app_nexahrsoft' 
+        WHERE table_schema = 'app_nexahrsoft2' 
         AND table_name = 'claims_audit_log'
       )
     `);
@@ -307,7 +307,7 @@ async function ensureSchemaMigrations(pool: Pool) {
     const claimsTableCheck = await pool.query(`
       SELECT EXISTS (
         SELECT FROM information_schema.tables 
-        WHERE table_schema = 'app_nexahrsoft' 
+        WHERE table_schema = 'app_nexahrsoft2' 
         AND table_name = 'claims'
       )
     `);
