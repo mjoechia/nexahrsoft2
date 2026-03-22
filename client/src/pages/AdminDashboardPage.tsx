@@ -124,7 +124,7 @@ export default function AdminDashboardPage() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl md:text-3xl font-bold" data-testid="text-page-title">
-              Admin Dashboard
+              Admin DashBoard 2
             </h1>
             <p className="text-sm md:text-base text-muted-foreground">
               Manage HR operations and system settings
