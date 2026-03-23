@@ -312,6 +312,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
   });
 
+  // Login history (admin only)
+  app.get("/api/admin/login-history", async (req: Request, res: Response) => {
+    if (!req.session?.isAdmin) {
+      return res.status(403).json({ message: "Admin access required" });
+    }
+    try {
+      const limit = Math.min(parseInt(req.query.limit as string) || 100, 500);
+      const history = await storage.getAllLoginHistory(limit);
+      res.json(history);
+    } catch (error) {
+      console.error("Login history error:", error);
+      res.status(500).json({ message: "Failed to fetch login history" });
+    }
+  });
+
   // Get current session
   app.get("/api/auth/session", async (req: Request, res: Response) => {
     // Debug logging

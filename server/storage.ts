@@ -53,6 +53,7 @@ export interface IStorage {
   // Session tracking methods
   createUserSession(session: InsertUserSession): Promise<UserSession>;
   getActiveSessions(userId: string): Promise<UserSession[]>;
+  getAllLoginHistory(limit?: number): Promise<Array<UserSession & { userName: string; userEmail: string; userDepartment: string | null }>>;
   revokeSession(sessionId: string): Promise<void>;
   revokeAllUserSessions(userId: string, exceptSessionId?: string): Promise<void>;
   updateSessionLastSeen(sessionId: string): Promise<void>;
@@ -530,6 +531,10 @@ export class MemStorage implements IStorage {
   }
 
   async getActiveSessions(userId: string): Promise<UserSession[]> {
+    throw new Error("MemStorage session tracking not implemented");
+  }
+
+  async getAllLoginHistory(_limit = 100): Promise<Array<UserSession & { userName: string; userEmail: string; userDepartment: string | null }>> {
     throw new Error("MemStorage session tracking not implemented");
   }
 
@@ -1352,6 +1357,28 @@ export class PgStorage implements IStorage {
         )
       )
       .orderBy(desc(userSessions.createdAt));
+  }
+
+  async getAllLoginHistory(limit = 100): Promise<Array<UserSession & { userName: string; userEmail: string; userDepartment: string | null }>> {
+    const rows = await db
+      .select({
+        id: userSessions.id,
+        sessionId: userSessions.sessionId,
+        userId: userSessions.userId,
+        createdAt: userSessions.createdAt,
+        lastSeen: userSessions.lastSeen,
+        userAgent: userSessions.userAgent,
+        ipAddress: userSessions.ipAddress,
+        revokedAt: userSessions.revokedAt,
+        userName: users.name,
+        userEmail: users.email,
+        userDepartment: users.department,
+      })
+      .from(userSessions)
+      .innerJoin(users, eq(userSessions.userId, users.id))
+      .orderBy(desc(userSessions.createdAt))
+      .limit(limit);
+    return rows;
   }
 
   async revokeSession(sessionId: string): Promise<void> {

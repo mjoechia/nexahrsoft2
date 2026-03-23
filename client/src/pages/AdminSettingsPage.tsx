@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { Upload, Building2, Image as ImageIcon, Clock, Mail, QrCode, Users, FileSpreadsheet, X, Check, AlertCircle, ArrowLeft, Camera, Shield, ShieldOff, UserPlus, Globe, KeyRound, Eye, Plus, UserCog, RefreshCw } from "lucide-react";
+import { Upload, Building2, Image as ImageIcon, Clock, Mail, QrCode, Users, FileSpreadsheet, X, Check, AlertCircle, ArrowLeft, Camera, Shield, ShieldOff, UserPlus, Globe, KeyRound, Eye, Plus, UserCog, RefreshCw, History, MonitorSmartphone } from "lucide-react";
 import { Link } from "wouter";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -32,6 +32,115 @@ interface ParsedEmployee {
   joinDate?: string;
   resignDate?: string;
   mobileNumber?: string;
+}
+
+interface LoginHistoryEntry {
+  id: string;
+  userId: string;
+  userName: string;
+  userEmail: string;
+  userDepartment: string | null;
+  createdAt: string;
+  lastSeen: string;
+  ipAddress: string | null;
+  userAgent: string | null;
+  revokedAt: string | null;
+}
+
+function LoginHistoryCard() {
+  const { data: history = [], isLoading, refetch } = useQuery<LoginHistoryEntry[]>({
+    queryKey: ["/api/admin/login-history"],
+  });
+
+  function parseDevice(ua: string | null) {
+    if (!ua) return "Unknown";
+    if (/mobile/i.test(ua)) return "Mobile";
+    if (/tablet|ipad/i.test(ua)) return "Tablet";
+    return "Desktop";
+  }
+
+  function parseBrowser(ua: string | null) {
+    if (!ua) return "";
+    if (/edg/i.test(ua)) return "Edge";
+    if (/chrome/i.test(ua)) return "Chrome";
+    if (/safari/i.test(ua)) return "Safari";
+    if (/firefox/i.test(ua)) return "Firefox";
+    return "Browser";
+  }
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between gap-2 pb-2">
+        <CardTitle className="flex items-center gap-2">
+          <History className="h-5 w-5" />
+          Login History
+        </CardTitle>
+        <Button variant="outline" size="sm" onClick={() => refetch()}>
+          <RefreshCw className="h-4 w-4 mr-1" />
+          Refresh
+        </Button>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <div className="text-center py-8 text-muted-foreground">Loading...</div>
+        ) : history.length === 0 ? (
+          <div className="text-center py-8 text-muted-foreground">
+            <History className="h-12 w-12 mx-auto mb-2 opacity-50" />
+            <p>No login history yet</p>
+          </div>
+        ) : (
+          <ScrollArea className="h-[400px]">
+            <div className="border rounded-lg">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>User</TableHead>
+                    <TableHead>Department</TableHead>
+                    <TableHead>Logged In</TableHead>
+                    <TableHead>Last Seen</TableHead>
+                    <TableHead>IP Address</TableHead>
+                    <TableHead>Device</TableHead>
+                    <TableHead>Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {history.map((entry) => (
+                    <TableRow key={entry.id}>
+                      <TableCell>
+                        <div className="font-medium">{toTitleCase(entry.userName)}</div>
+                        <div className="text-xs text-muted-foreground">{entry.userEmail}</div>
+                      </TableCell>
+                      <TableCell className="text-sm">{entry.userDepartment || "-"}</TableCell>
+                      <TableCell className="text-sm whitespace-nowrap">
+                        {new Date(entry.createdAt).toLocaleString("en-SG", { dateStyle: "short", timeStyle: "short" })}
+                      </TableCell>
+                      <TableCell className="text-sm whitespace-nowrap">
+                        {new Date(entry.lastSeen).toLocaleString("en-SG", { dateStyle: "short", timeStyle: "short" })}
+                      </TableCell>
+                      <TableCell className="text-sm font-mono">{entry.ipAddress || "-"}</TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-1 text-sm">
+                          <MonitorSmartphone className="h-3 w-3" />
+                          {parseDevice(entry.userAgent)} · {parseBrowser(entry.userAgent)}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        {entry.revokedAt ? (
+                          <Badge variant="secondary">Ended</Badge>
+                        ) : (
+                          <Badge variant="default" className="bg-green-600">Active</Badge>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </ScrollArea>
+        )}
+      </CardContent>
+    </Card>
+  );
 }
 
 export default function AdminSettingsPage() {
@@ -1782,6 +1891,9 @@ export default function AdminSettingsPage() {
             </CardContent>
           </Card>
         )}
+
+        {/* Login History Card */}
+        <LoginHistoryCard />
       </div>
 
       {/* Add Admin Dialog */}
