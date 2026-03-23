@@ -654,27 +654,25 @@ export default function AdminEmployeeDataPage() {
     <div className="min-h-screen bg-muted/30 p-4 md:p-8">
       <div className="max-w-7xl mx-auto space-y-6">
         <div className="flex items-center justify-between gap-4 flex-wrap">
-          <div className="flex items-center gap-4">
+          <div>
+            <h1 className="text-2xl md:text-3xl font-bold" data-testid="text-page-title">
+              Employee Data Management
+            </h1>
+            <p className="text-sm md:text-base text-muted-foreground">
+              View and edit employee information with full audit trail
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
             {!isEmployeeDataAdmin && (
               <Button
                 variant="outline"
-                size="icon"
                 onClick={() => setLocation("/admin/dashboard")}
                 data-testid="button-back"
               >
-                <ArrowLeft className="h-4 w-4" />
+                <ArrowLeft className="h-4 w-4 mr-2" />
+                Back to Dashboard
               </Button>
             )}
-            <div>
-              <h1 className="text-2xl md:text-3xl font-bold" data-testid="text-page-title">
-                Employee Data Management
-              </h1>
-              <p className="text-sm md:text-base text-muted-foreground">
-                View and edit employee information with full audit trail
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
             <Button
               variant="outline"
               onClick={() => refetchUsers()}

@@ -366,16 +366,8 @@ export default function AdminReportsPage() {
   return (
     <div className="min-h-screen bg-muted/30 p-4 md:p-8">
       <div className="max-w-7xl mx-auto space-y-6">
-        <div className="flex items-center gap-4 print:hidden">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setLocation("/admin/dashboard")}
-            data-testid="button-back"
-          >
-            <ArrowLeft className="h-5 w-5" />
-          </Button>
-          <div>
+        <div className="flex items-center gap-4 flex-wrap print:hidden">
+          <div className="flex-1">
             <h1 className="text-2xl md:text-3xl font-bold" data-testid="text-page-title">
               Reports
             </h1>
@@ -383,6 +375,14 @@ export default function AdminReportsPage() {
               Generate and export HR reports
             </p>
           </div>
+          <Button
+            variant="outline"
+            onClick={() => setLocation("/admin/dashboard")}
+            data-testid="button-back"
+          >
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back to Dashboard
+          </Button>
         </div>
 
         <Card className="print:shadow-none print:border-none">

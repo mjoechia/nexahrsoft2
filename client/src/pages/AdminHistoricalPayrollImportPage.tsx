@@ -574,19 +574,19 @@ export default function AdminHistoricalPayrollImportPage() {
     <div className="min-h-screen bg-background">
       <div className="border-b bg-card">
         <div className="max-w-7xl mx-auto px-4 py-4">
-          <div className="flex items-center gap-4">
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              onClick={() => setLocation("/admin/dashboard")}
-              data-testid="button-back"
-            >
-              <ArrowLeft className="h-5 w-5" />
-            </Button>
+          <div className="flex items-center justify-between gap-4">
             <div>
               <h1 className="text-xl font-semibold">Historical Payroll Import</h1>
               <p className="text-sm text-muted-foreground">Master Admin Only</p>
             </div>
+            <Button
+              variant="outline"
+              onClick={() => setLocation("/admin/dashboard")}
+              data-testid="button-back"
+            >
+              <ArrowLeft className="h-4 w-4 mr-2" />
+              Back to Dashboard
+            </Button>
           </div>
         </div>
       </div>

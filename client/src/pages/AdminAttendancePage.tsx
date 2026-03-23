@@ -1759,7 +1759,7 @@ export default function AdminAttendancePage() {
             <Link href="/admin/dashboard">
               <Button variant="outline" size="sm" data-testid="button-back-dashboard">
                 <ArrowLeft className="mr-1 h-4 w-4" />
-                Back
+                Back to Dashboard
               </Button>
             </Link>
           )}

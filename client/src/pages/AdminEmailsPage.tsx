@@ -340,15 +340,7 @@ export default function AdminEmailsPage() {
   return (
     <div className="min-h-screen bg-muted/30 p-4 md:p-8">
       <div className="max-w-7xl mx-auto space-y-6">
-        <div className="flex items-center gap-4">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setLocation("/admin/dashboard")}
-            data-testid="button-back"
-          >
-            <ArrowLeft className="h-5 w-5" />
-          </Button>
+        <div className="flex items-center gap-4 flex-wrap">
           <div className="flex-1">
             <h1 className="text-2xl md:text-3xl font-bold" data-testid="text-page-title">
               Send Welcome Emails
@@ -357,6 +349,14 @@ export default function AdminEmailsPage() {
               Send initialization emails to employees with login credentials and QR code
             </p>
           </div>
+          <Button
+            variant="outline"
+            onClick={() => setLocation("/admin/dashboard")}
+            data-testid="button-back"
+          >
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back to Dashboard
+          </Button>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
