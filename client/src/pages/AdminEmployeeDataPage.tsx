@@ -805,7 +805,6 @@ export default function AdminEmployeeDataPage() {
                   <TableHeader>
                     <TableRow>
                       <TableHead className="w-16">S/N</TableHead>
-                      <TableHead>Employee Code</TableHead>
                       <TableHead>Name</TableHead>
                       <TableHead>Department</TableHead>
                       <TableHead>Designation</TableHead>
@@ -824,11 +823,6 @@ export default function AdminEmployeeDataPage() {
                               <AlertCircle className="h-4 w-4 text-amber-500" />
                             )}
                           </div>
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant={user.employeeCode ? "outline" : "destructive"} className="font-mono">
-                            {user.employeeCode || "Missing"}
-                          </Badge>
                         </TableCell>
                         <TableCell className="font-medium">
                           <div className="flex items-center gap-2 flex-wrap">
@@ -953,7 +947,6 @@ export default function AdminEmployeeDataPage() {
                           />
                         </TableHead>
                         <TableHead className="w-16">S/N</TableHead>
-                        <TableHead>Employee Code</TableHead>
                         <TableHead>Name</TableHead>
                         <TableHead>Department</TableHead>
                         <TableHead>Designation</TableHead>
@@ -979,11 +972,6 @@ export default function AdminEmployeeDataPage() {
                           </TableCell>
                           <TableCell className="font-mono text-muted-foreground">
                             {index + 1}
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant="outline" className="font-mono">
-                              {user.employeeCode || "-"}
-                            </Badge>
                           </TableCell>
                           <TableCell className="font-medium">{toTitleCase(user.name)}</TableCell>
                           <TableCell>{user.department || "-"}</TableCell>
