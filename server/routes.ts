@@ -5567,13 +5567,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Get most recent payroll period that has records (admin only)
   app.get("/api/admin/payroll/latest-period", requireAdmin, requireFullAdmin, async (req: Request, res: Response) => {
     try {
-      const result = await db.execute(
-        sql`SELECT pay_period_year, pay_period_month
-            FROM app_nexahrsoft2.payroll_records
-            ORDER BY pay_period_year DESC, pay_period_month DESC
-            LIMIT 1`
+      const result = await pool.query(
+        `SELECT pay_period_year, pay_period_month
+         FROM app_nexahrsoft2.payroll_records
+         ORDER BY pay_period_year DESC, pay_period_month DESC
+         LIMIT 1`
       );
-      const row = (result as any).rows?.[0] ?? (result as any)[0];
+      const row = result.rows[0];
       if (!row) return res.json({ year: null, month: null });
       res.json({ year: row.pay_period_year, month: row.pay_period_month });
     } catch (error) {

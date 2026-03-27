@@ -141,6 +141,7 @@ export default function AdminPayrollReportsPage() {
   const { data: latestPeriod } = useQuery<{ year: number | null; month: number | null }>({
     queryKey: ["/api/admin/payroll/latest-period"],
     staleTime: Infinity,
+    throwOnError: false,
   });
   const periodInitialized = useRef(false);
 
