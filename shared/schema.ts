@@ -100,7 +100,6 @@ export const companySettings = appSchema.table("company_settings", {
   faviconUrl: text("favicon_url"), // URL to favicon in object storage
   attendanceBufferMinutes: integer("attendance_buffer_minutes").notNull().default(15), // Max minutes buffer for clock in/out
   defaultTimezone: text("default_timezone").notNull().default("Asia/Singapore"), // IANA timezone for attendance calculations
-  ignoreOrphanedSessions: boolean("ignore_orphaned_sessions").notNull().default(false), // If true, system ignores clock-in/out older than 24 hours
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
   // Email settings
   senderEmail: text("sender_email"), // Email address to send from
@@ -139,6 +138,7 @@ export const attendanceRecords = appSchema.table("attendance_records", {
   clockOutLatitude: text("clock_out_latitude"), // GPS latitude (clock-out)
   clockOutLongitude: text("clock_out_longitude"), // GPS longitude (clock-out)
   clockOutLocationText: text("clock_out_location_text"), // Geocoded address text (clock-out)
+  autoClosed: boolean("auto_closed").notNull().default(false), // True if system auto-closed this session (orphaned session recovery)
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

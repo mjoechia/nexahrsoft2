@@ -280,6 +280,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       if (user && adminRoles.includes(user.role) && user.isApproved) {
+        // Block archived admin accounts
+        if (user.isArchived) {
+          return res.status(403).json({ message: "This account has been deactivated." });
+        }
         // Security: Only allow login if user has a valid password hash
         if (!user.passwordHash) {
           console.log(`Admin login rejected: User ${username} has no password set`);
@@ -292,6 +296,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
           req.session.isViewOnlyAdmin = user.role === "viewonly_admin";
           req.session.isAttendanceViewAdmin = user.role === "attendance_view_admin";
           req.session.isEmployeeDataAdmin = user.role === "employee_data_admin";
+          // Record login history (fire-and-forget)
+          const adminIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || null;
+          storage.createUserSession({
+            sessionId: req.sessionID,
+            userId: user.id,
+            userAgent: req.headers['user-agent'] || null,
+            ipAddress: adminIp,
+          }).catch(err => console.error('Failed to record admin login history:', err));
           return res.json({ success: true, message: "Admin login successful" });
         }
       }
@@ -523,13 +535,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Check if user is approved BEFORE setting session
       if (!user.isApproved) {
-        // Do NOT set session for unapproved users
         return res.status(403).json({ message: "Account pending approval" });
       }
 
-      // Only set session for approved users
+      // Block archived users
+      if (user.isArchived) {
+        return res.status(403).json({ message: "This account has been deactivated. Please contact HR." });
+      }
+
+      // Block users whose resign date has passed
+      if (user.resignDate) {
+        const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Singapore" });
+        if (user.resignDate <= today) {
+          return res.status(403).json({ message: "This account has been deactivated. Please contact HR." });
+        }
+      }
+
+      // Only set session for approved, active users
       req.session.userId = user.id;
       req.session.isAdmin = false;
+
+      // Record login history (fire-and-forget — never block login on history failure)
+      const employeeIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || null;
+      storage.createUserSession({
+        sessionId: req.sessionID,
+        userId: user.id,
+        userAgent: req.headers['user-agent'] || null,
+        ipAddress: employeeIp,
+      }).catch(err => console.error('Failed to record login history:', err));
 
       // Debug logging
       console.log('Login successful, session created:', {
@@ -1072,12 +1105,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "User not found" });
       }
       
-      const user = await storage.updateUser(id, updates);
-      
+      let user = await storage.updateUser(id, updates);
+
       if (!user) {
         return res.status(404).json({ message: "User not found" });
       }
-      
+
+      // Smart auto-archive: if resign_date is today or in the past, archive the user
+      if (user.resignDate && !user.isArchived) {
+        const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Singapore" });
+        if (user.resignDate <= today) {
+          await storage.archiveUsers([id]);
+          user = (await storage.getUser(id)) || user;
+          console.log(`[Auto-archive] User ${id} (${user.name}) archived — resign_date ${user.resignDate} <= ${today}`);
+        }
+      }
+
       // Create audit logs for each changed field
       for (const field of allowedFields) {
         if ((updates as any)[field] !== undefined) {
@@ -2117,7 +2160,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = req.session.userId;
       const now = new Date();
       
-      // Get company settings once for timezone and orphaned session handling
       const companySettings = await storage.getCompanySettings();
       const timezone = companySettings?.defaultTimezone || 'Asia/Singapore';
       
@@ -2127,44 +2169,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Check if user already has an open attendance session (no clock-out)
       const openSession = await storage.getOpenAttendanceRecord(userId);
       if (openSession) {
-        const clockInTime = new Date(openSession.clockInTime);
-        const hoursAgo = (now.getTime() - clockInTime.getTime()) / (1000 * 60 * 60);
-        
-        // Get the clock-in date in company timezone for calendar-day comparison
-        const clockInDate = clockInTime.toLocaleDateString('en-CA', { timeZone: timezone }); // YYYY-MM-DD
-        
-        // Session is orphaned if:
-        // 1. It's older than 24 hours, OR
-        // 2. It's from a previous calendar day (handles timezone edge cases)
-        const isOrphanedByHours = hoursAgo >= 24;
-        const isOrphanedByDate = clockInDate < todayDate;
-        const isOrphaned = isOrphanedByHours || isOrphanedByDate;
-        
-        // Production logging for debugging orphaned session checks
-        console.log(`[Orphaned Check] User: ${userId}, Clock-in: ${clockInTime.toISOString()}, ` +
-          `Clock-in Date: ${clockInDate}, Today: ${todayDate}, Hours Ago: ${hoursAgo.toFixed(2)}, ` +
-          `Orphaned by Hours (>=24h): ${isOrphanedByHours}, Orphaned by Date: ${isOrphanedByDate}, ` +
-          `Is Orphaned: ${isOrphaned}, Ignore Setting: ${companySettings?.ignoreOrphanedSessions}`);
-        
-        // If the session is orphaned and ignoreOrphanedSessions is enabled, allow clock-in
-        if (isOrphaned && companySettings?.ignoreOrphanedSessions) {
-          // Allow the clock-in to proceed - orphaned session will be ignored
-          console.log(`[Orphaned] Allowing new clock-in for user ${userId}, ignoring orphaned session from ${clockInTime.toISOString()}`);
-        } else {
-          // Block the clock-in - user must clock out first
-          const formattedTime = clockInTime.toLocaleString('en-US', { 
+        const prevClockInTime = new Date(openSession.clockInTime);
+        const prevClockInDate = prevClockInTime.toLocaleDateString('en-CA', { timeZone: timezone });
+        const isSameDay = prevClockInDate === todayDate;
+
+        if (isSameDay) {
+          // Real same-day duplicate — block it
+          const formattedTime = prevClockInTime.toLocaleString('en-US', {
             timeZone: timezone,
             hour: '2-digit',
             minute: '2-digit',
-            month: 'short',
-            day: 'numeric'
           });
-          console.log(`[Clock-in Blocked] User ${userId} blocked - active session from ${formattedTime}, orphaned: ${isOrphaned}, setting: ${companySettings?.ignoreOrphanedSessions}`);
-          return res.status(409).json({ 
-            message: `You already have an active clock-in from ${formattedTime}. Please clock out first before clocking in again.`,
+          console.log(`[Clock-in Blocked] User ${userId} already clocked in today at ${formattedTime}`);
+          return res.status(409).json({
+            message: `You already clocked in today at ${formattedTime}. Please clock out first.`,
             existingRecord: openSession
           });
         }
+
+        // Previous-day (or older) session — auto-close it before creating new clock-in
+        const estimatedClose = new Date(
+          Math.min(
+            prevClockInTime.getTime() + 8 * 60 * 60 * 1000, // cap at 8h after original clock-in
+            now.getTime()                                    // never set a future time
+          )
+        );
+        await storage.updateAttendanceRecord(openSession.id, {
+          clockOutTime: estimatedClose,
+          autoClosed: true,
+        });
+        await storage.recalculateDailyAttendanceSummary(openSession.date, userId);
+        console.log(`[Orphaned] Auto-closed session ${openSession.id} for user ${userId} (was from ${prevClockInDate})`);
       }
       
       // Get date in company timezone (not UTC)
@@ -2222,15 +2257,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const date = now.toLocaleDateString('en-CA', { timeZone: timezone }); // YYYY-MM-DD in company timezone
       
       const { latitude, longitude } = req.body as { latitude?: string; longitude?: string };
-      
-      // Get all today's records
-      const todayRecords = await storage.getAttendanceRecordsByUserAndDateRange(userId, date, date);
-      
-      // Find the most recent record without clock-out time
-      const openRecord = todayRecords
-        .filter(r => !r.clockOutTime)
-        .sort((a, b) => new Date(b.clockInTime).getTime() - new Date(a.clockInTime).getTime())[0];
-      
+
+      // Use getOpenAttendanceRecord so employees can clock out even if their open session
+      // spans into a new calendar day (e.g. restored via admin SQL fix)
+      const openRecord = await storage.getOpenAttendanceRecord(userId);
+
       if (!openRecord) {
         return res.status(400).json({ message: "No active clock-in found. Please clock in first." });
       }
@@ -2255,8 +2286,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         clockOutLocationText,
       });
 
-      // Recalculate daily summary for this user and date
-      await storage.recalculateDailyAttendanceSummary(date, userId);
+      // Recalculate daily summary using the record's own date (may differ from today if cross-day)
+      await storage.recalculateDailyAttendanceSummary(openRecord.date, userId);
 
       res.json({ success: true, record: updated });
     } catch (error) {
@@ -2273,9 +2304,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     try {
       const userId = req.session.userId;
-      const date = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-      
+      // Use company timezone so the date matches what clock-in stored
+      const companySettings = await storage.getCompanySettings();
+      const timezone = companySettings?.defaultTimezone || 'Asia/Singapore';
+      const date = new Date().toLocaleDateString('en-CA', { timeZone: timezone }); // YYYY-MM-DD
+
       const records = await storage.getAttendanceRecordsByUserAndDateRange(userId, date, date);
+
+      // If there is an open session from a PREVIOUS day (e.g. restored after SQL fix or midnight
+      // shift), include it so the client shows "Clock Out" instead of "Clock In"
+      const openSession = await storage.getOpenAttendanceRecord(userId);
+      if (openSession && openSession.date !== date) {
+        records.unshift(openSession); // prepend so .find(!clockOutTime) returns it first
+      }
+
       res.json({ records });
     } catch (error) {
       console.error("Get today attendance error:", error);
@@ -4946,22 +4988,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Update orphaned sessions setting (admin only)
-  app.put("/api/company/orphaned-setting", requireAdmin, requireWriteAccess, async (req: Request, res: Response) => {
-    try {
-      const schema = z.object({
-        ignoreOrphanedSessions: z.boolean(),
-      });
-
-      const data = schema.parse(req.body);
-      const updated = await storage.updateCompanySettings({ ignoreOrphanedSessions: data.ignoreOrphanedSessions });
-      res.json({ success: true, settings: updated });
-    } catch (error) {
-      console.error("Update orphaned setting error:", error);
-      res.status(500).json({ message: "Failed to update orphaned sessions setting" });
-    }
-  });
-
   // Update company info (admin only) - name, address and UEN for payslips
   app.put("/api/company/info", requireAdmin, requireWriteAccess, async (req: Request, res: Response) => {
     try {
@@ -5105,417 +5131,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Generate payroll from attendance data (admin only)
   app.post("/api/admin/payroll/generate", requireAdmin, requireWriteAccess, requireFullAdmin, async (req: Request, res: Response) => {
     try {
-      const { calculateCPF, calculateAge, calculateSPRYears, splitHours, calculatePayFromHours, monthlyToHourlyRate, dailyToHourlyRate } = await import("./cpf-calculator");
-      
+      const { generatePayrollForPeriod } = await import("./payrollService");
+
       const schema = z.object({
         year: z.number().min(2020).max(2100),
         month: z.number().min(1).max(12),
-        employeeIds: z.array(z.string()).optional(), // Optional: generate for specific employees only
-        suppressAllOT: z.boolean().optional(), // Global flag to suppress all OT for all employees
+        employeeIds: z.array(z.string()).optional(),
+        suppressAllOT: z.boolean().optional(),
       });
 
       const { year, month, suppressAllOT } = schema.parse(req.body);
       const employeeIds = req.body.employeeIds as string[] | undefined;
-      
-      // Get all approved employees (or specific ones if specified)
-      // Include admin users if they have payroll settings configured (salary, etc.)
-      const allUsers = await storage.getAllUsers();
-      const employees = allUsers.filter(u => {
-        if (u.isArchived) return false;
-        if (!u.isApproved) return false;
-        if (employeeIds && !employeeIds.includes(u.id)) return false;
-        
-        // For admin/viewonly_admin users, only include if they have payroll settings configured
-        if (u.role === 'admin' || u.role === 'viewonly_admin') {
-          const hasPayrollSettings = 
-            (u.basicMonthlySalary && parseFloat(u.basicMonthlySalary) > 0) ||
-            (u.hourlyRate && parseFloat(u.hourlyRate) > 0) ||
-            (u.dailyRate && parseFloat(u.dailyRate) > 0);
-          return hasPayrollSettings;
-        }
-        
-        return true;
-      });
 
-      if (employees.length === 0) {
-        return res.status(400).json({ message: "No eligible employees found" });
-      }
-
-      // Get company settings for work hour configuration
-      const settings = await storage.getCompanySettings();
-      const regularHoursPerDay = settings?.regularHoursPerDay || 8;
-      const regularDaysPerWeek = settings?.regularDaysPerWeek || 5;
-
-      // Define the pay period
-      const periodStart = `${year}-${String(month).padStart(2, '0')}-01`;
-      const lastDay = new Date(year, month, 0).getDate(); // Last day of month
-      const periodEnd = `${year}-${String(month).padStart(2, '0')}-${lastDay}`;
+      // Fast path: check for existing records before running generation
       const payPeriod = `${new Date(year, month - 1).toLocaleString('default', { month: 'short' }).toUpperCase()} ${year}`;
-
-      // Check for existing payroll records for this period to prevent duplicates
       const existingRecords = await storage.getPayrollRecords(year, month);
       if (existingRecords.length > 0) {
-        return res.status(400).json({ 
+        return res.status(400).json({
           message: `Payroll records already exist for ${payPeriod}. Please delete existing records first or view them in the reports.`,
           existingCount: existingRecords.length,
         });
       }
 
-      // Get attendance records for the period
-      const attendanceData = await storage.getAllUsersAttendanceByDateRange(periodStart, periodEnd);
-      
-      // Get attendance adjustments for the period (leave/OT overrides)
-      const adjustmentsData = await storage.getAttendanceAdjustmentsByDateRange(periodStart, periodEnd);
-      
-      // Build a map of adjustments by `${userId}-${date}` for quick lookup
-      const adjustmentsMap = new Map<string, typeof adjustmentsData[0]>();
-      for (const adj of adjustmentsData) {
-        adjustmentsMap.set(`${adj.userId}-${adj.date}`, adj);
-      }
-      
-      // Get payroll adjustments for the period (including suppress_ot15 and suppress_ot20)
-      const payrollAdjustmentsData = await storage.getPayrollAdjustmentsByPeriod(year, month);
-      
-      // Build sets of employee IDs that have suppress_ot15 and suppress_ot20 adjustments
-      const suppressOt15Employees = new Set<string>();
-      const suppressOt20Employees = new Set<string>();
-      for (const adj of payrollAdjustmentsData) {
-        if (adj.adjustmentType === 'suppress_ot15' && adj.status === 'approved') {
-          suppressOt15Employees.add(adj.userId);
-        }
-        if (adj.adjustmentType === 'suppress_ot20' && adj.status === 'approved') {
-          suppressOt20Employees.add(adj.userId);
-        }
-      }
-
-      const generatedRecords: any[] = [];
-      const skippedEmployees: { id?: string; employeeCode: string; employeeName: string; reason: string }[] = [];
-
-      for (const employee of employees) {
-        // Get this employee's attendance for the month
-        const empAttendance = attendanceData.filter(a => a.userId === employee.id);
-
-        // Calculate total hours worked from attendance, respecting adjustments
-        // Adjustments override actual clock-in data for payroll calculations
-        let totalHoursWorked = 0;
-        let totalOtHoursFromAdjustments = 0; // Track explicit OT from adjustments
-        let daysWorked = 0;
-        const uniqueDays = new Set<string>();
-        const processedDates = new Set<string>(); // Track dates with attendance/adjustments
-        
-        for (const record of empAttendance) {
-          const dateKey = record.date;
-          const adjustmentKey = `${employee.id}-${dateKey}`;
-          const adjustment = adjustmentsMap.get(adjustmentKey);
-          
-          // If there's an adjustment for this date, use it instead of actual hours
-          if (adjustment) {
-            // Mark this date as processed
-            if (!processedDates.has(dateKey)) {
-              processedDates.add(dateKey);
-              uniqueDays.add(dateKey);
-              
-              if (adjustment.adjustmentType === 'leave') {
-                // Leave counts as 9 regular hours (full day)
-                totalHoursWorked += 9;
-              } else if (adjustment.adjustmentType === 'hours') {
-                // Hours override: use specified regular and OT hours
-                const adjRegular = adjustment.regularHours ?? 0;
-                const adjOt = adjustment.otHours ?? 0;
-                totalHoursWorked += adjRegular;
-                totalOtHoursFromAdjustments += adjOt;
-              }
-            }
-          } else {
-            // No adjustment: use actual clock-in/out data
-            if (record.clockInTime && record.clockOutTime) {
-              const clockIn = new Date(record.clockInTime);
-              const clockOut = new Date(record.clockOutTime);
-              const hoursWorked = (clockOut.getTime() - clockIn.getTime()) / (1000 * 60 * 60);
-              // Round to nearest 0.25 hour
-              totalHoursWorked += Math.round(hoursWorked * 4) / 4;
-              uniqueDays.add(record.date);
-            }
-          }
-        }
-        
-        // Also process adjustments for dates with no attendance records (pure leave days)
-        for (const adj of adjustmentsData) {
-          if (adj.userId !== employee.id) continue;
-          if (processedDates.has(adj.date)) continue; // Already processed via attendance
-          
-          processedDates.add(adj.date);
-          uniqueDays.add(adj.date);
-          
-          if (adj.adjustmentType === 'leave') {
-            totalHoursWorked += 9;
-          } else if (adj.adjustmentType === 'hours') {
-            const adjRegular = adj.regularHours ?? 0;
-            const adjOt = adj.otHours ?? 0;
-            totalHoursWorked += adjRegular;
-            totalOtHoursFromAdjustments += adjOt;
-          }
-        }
-        
-        daysWorked = uniqueDays.size;
-
-        // Use employee-specific settings if available, otherwise fall back to company settings
-        const empDaysPerWeek = employee.regularDaysPerWeek ?? regularDaysPerWeek;
-        const empHoursPerDay = employee.regularHoursPerDay ?? regularHoursPerDay;
-        const isExecutive = empDaysPerWeek === 0;
-        
-        // Determine hourly rate based on pay type
-        // Executive employees (daysPerWeek = 0) don't need hourly rate calculation
-        // Auto-detect pay type based on what's configured (priority: monthly > daily > hourly)
-        // Use parseNumericOrNull to properly distinguish between "not set" (null) and "set to 0"
-        const empHourlyRate = parseNumericOrNull(employee.hourlyRate);
-        const empBasicMonthlySalary = parseNumericOrNull(employee.basicMonthlySalary);
-        const empDailyRate = parseNumericOrNull(employee.dailyRate);
-        
-        let hourlyRate = empHourlyRate ?? 0;
-        let payType = employee.payType || 'hourly';
-        
-        // Only override pay type if the value exists and is positive
-        if (empBasicMonthlySalary !== null && empBasicMonthlySalary > 0) {
-          payType = 'monthly';
-          if (isExecutive) {
-            // Executive: use monthly salary directly, no hourly rate needed
-            hourlyRate = 0;
-          } else {
-            hourlyRate = monthlyToHourlyRate(empBasicMonthlySalary, empHoursPerDay, empDaysPerWeek);
-          }
-        } else if (empDailyRate !== null && empDailyRate > 0) {
-          payType = 'daily';
-          hourlyRate = dailyToHourlyRate(empDailyRate, empHoursPerDay);
-        }
-
-        // Skip if no rate configured (except for Executive employees who use monthly salary)
-        if (!isExecutive && (!hourlyRate || hourlyRate === 0)) {
-          skippedEmployees.push({
-            id: employee.id,
-            employeeCode: employee.employeeCode || 'N/A',
-            employeeName: employee.name,
-            reason: 'No pay rate configured (hourly/daily/monthly salary)',
-          });
-          continue;
-        }
-        
-        // For Executive, ensure they have basic monthly salary configured (not null and not 0)
-        if (isExecutive && (empBasicMonthlySalary === null || empBasicMonthlySalary <= 0)) {
-          skippedEmployees.push({
-            id: employee.id,
-            employeeCode: employee.employeeCode || 'N/A',
-            employeeName: employee.name,
-            reason: 'Executive employee has no basic monthly salary configured',
-          });
-          continue;
-        }
-
-        // Split into regular and overtime hours
-        const { regularHours, overtimeHours: calculatedOtHours } = splitHours(totalHoursWorked, regularHoursPerDay, daysWorked);
-        
-        // Add explicit OT hours from adjustments to calculated OT
-        const overtimeHours = calculatedOtHours + totalOtHoursFromAdjustments;
-
-        // Calculate pay differently based on pay type
-        const otMultiplier = settings?.otMultiplier15 || 1.5;
-        
-        let calculatedBasicPay: number;
-        let otAmount: number;
-        const configuredMonthlySalary = empBasicMonthlySalary ?? 0;
-        
-        if (payType === 'monthly' || isExecutive) {
-          // MONTHLY EMPLOYEES: Get full monthly salary, OT calculated separately
-          // Monthly salary is NOT prorated by hours worked - employees get full salary
-          // OT hours are calculated based on hours worked beyond regular hours
-          calculatedBasicPay = configuredMonthlySalary;
-          
-          // Calculate OT pay using hourly rate derived from monthly salary
-          if (!isExecutive && overtimeHours > 0 && hourlyRate > 0) {
-            otAmount = roundToDollars(overtimeHours * hourlyRate * otMultiplier);
-          } else {
-            otAmount = 0; // Executives typically don't get OT
-          }
-        } else {
-          // HOURLY/DAILY EMPLOYEES: Calculate pay based on hours worked
-          const { regularPay, overtimePay } = calculatePayFromHours(regularHours, overtimeHours, hourlyRate, otMultiplier);
-          calculatedBasicPay = regularPay;
-          otAmount = overtimePay;
-        }
-        
-        // Check if OT should be suppressed for this employee (separate OT1.5 and OT2.0 suppression)
-        // OT 1.5x (standard overtime) and OT 2.0x (usually weekend/holiday OT) are tracked separately
-        // Global suppressAllOT flag or individual suppress_ot15/suppress_ot20 adjustments
-        let finalOt15Amount = otAmount; // Standard OT goes into 1.5x by default
-        let finalOt20Amount = 0; // 2.0x OT (usually from adjustments or weekend work)
-        let finalOtHours = overtimeHours;
-        let finalOt15Hours = overtimeHours; // All OT hours default to 1.5x
-        let finalOt20Hours = 0;
-        
-        // Apply OT suppression based on global flag or individual adjustment type
-        const shouldSuppressOt15 = suppressAllOT || suppressOt15Employees.has(employee.id);
-        const shouldSuppressOt20 = suppressAllOT || suppressOt20Employees.has(employee.id);
-        
-        if (shouldSuppressOt15) {
-          finalOt15Amount = 0;
-          finalOt15Hours = 0;
-          // Only zero hours if both OT types are suppressed
-          if (shouldSuppressOt20) {
-            finalOtHours = 0;
-          }
-        }
-        if (shouldSuppressOt20) {
-          finalOt20Amount = 0;
-          finalOt20Hours = 0;
-        }
-        
-        // Total OT amount for gross wages calculation
-        const finalOtAmount = finalOt15Amount + finalOt20Amount;
-        
-        // Get default allowances from employee profile
-        const mobileAllowance = parseFloat(employee.defaultMobileAllowance || '0');
-        const transportAllowance = parseFloat(employee.defaultTransportAllowance || '0');
-        const mealAllowance = parseFloat(employee.defaultMealAllowance || '0');
-        const shiftAllowance = parseFloat(employee.defaultShiftAllowance || '0');
-        const otherAllowance = parseFloat(employee.defaultOtherAllowance || '0');
-        const houseRentalAllowance = parseFloat(employee.defaultHouseRentalAllowance || '0');
-        const loanDeduction = 0; // Loan deductions come from payroll_loan_accounts, not employee settings
-        const totalAllowances = mobileAllowance + transportAllowance + mealAllowance + shiftAllowance + otherAllowance + houseRentalAllowance;
-
-        // Calculate gross wages (calculated earnings + OT + allowances)
-        const grossWages = calculatedBasicPay + finalOtAmount + totalAllowances;
-        
-        // Determine residency status for CPF - only process CPF for explicitly configured SC/SPR
-        const residencyStatus = employee.residencyStatus as 'SC' | 'SPR' | 'FOREIGNER' | null;
-        
-        // Calculate CPF only for SC/SPR with explicit configuration
-        let cpfResult: ReturnType<typeof calculateCPF>;
-        
-        if (residencyStatus === 'SC' || residencyStatus === 'SPR') {
-          // Calculate age for CPF rates - MUST use END of wage month per CPF rules
-          const wageMonth = `${year}-${String(month).padStart(2, '0')}`; // Format: "YYYY-MM"
-          const wageMonthEndDate = new Date(year, month, 0); // Last day of wage month
-          const age = employee.birthDate ? calculateAge(employee.birthDate, wageMonthEndDate) : 45; // Default to 45 if no birthdate
-          
-          // Calculate SPR years if applicable (also at end of wage month)
-          let sprYears: number | undefined;
-          if (residencyStatus === 'SPR' && employee.sprStartDate) {
-            sprYears = calculateSPRYears(employee.sprStartDate, wageMonthEndDate);
-          }
-
-          // Calculate CPF contributions (pass wageMonth to select correct rate table)
-          cpfResult = calculateCPF(grossWages, age, residencyStatus, sprYears, 0, wageMonth);
-        } else {
-          // Foreigner or no residency status - no CPF
-          cpfResult = {
-            grossWages,
-            cpfWages: 0,
-            employeeCPF: 0,
-            employerCPF: 0,
-            totalCPF: 0,
-            netPay: grossWages,
-            isEligible: false,
-            reason: residencyStatus === 'FOREIGNER' ? 'Foreigners are not eligible for CPF' : 'Residency status not configured',
-          };
-        }
-
-        // Calculate SHG contribution
-        const { calculateSHG } = await import("./shg-calculator");
-        const shgResult = calculateSHG(
-          employee.ethnicity,
-          employee.religion,
-          residencyStatus,
-          grossWages,
-          employee.shgOptOut || false,
-        );
-        const shgCdac = shgResult.fund === 'CDAC' ? shgResult.contribution : 0;
-        const shgSinda = shgResult.fund === 'SINDA' ? shgResult.contribution : 0;
-        const shgMbmf = shgResult.fund === 'MBMF' ? shgResult.contribution : 0;
-        const shgEcf = shgResult.fund === 'ECF' ? shgResult.contribution : 0;
-        const totalShg = shgCdac + shgSinda + shgMbmf + shgEcf;
-
-        // Calculate net pay (after CPF, loan deduction, and SHG)
-        const nett = cpfResult.netPay - loanDeduction - totalShg;
-
-        // Create payroll record - convert all numeric values to strings for PostgreSQL
-        const record = {
-          userId: employee.id,
-          payPeriod,
-          payPeriodYear: year,
-          payPeriodMonth: month,
-          employeeCode: employee.employeeCode || '',
-          employeeName: employee.name,
-          deptCode: null,
-          deptName: employee.department || null,
-          secCode: null,
-          secName: employee.section || null,
-          catCode: null,
-          catName: null,
-          nric: employee.nricFin || null,
-          joinDate: employee.joinDate || null,
-          // Hours worked (for employer view only)
-          basicHoursWorked: regularHours,
-          otHoursWorked: finalOtHours,
-          ot15Hours: finalOt15Hours,
-          ot20Hours: finalOt20Hours,
-          totSalary: toNumericString(calculatedBasicPay),
-          basicSalary: toNumericString(configuredMonthlySalary),
-          monthlyVariablesComponent: toNumericString(0),
-          flat: toNumericString(0),
-          ot10: toNumericString(0),
-          ot15: toNumericString(finalOt15Amount), // OT at 1.5x (0 if suppress_ot15 is active)
-          ot20: toNumericString(finalOt20Amount), // OT at 2.0x (0 if suppress_ot20 is active)
-          ot30: toNumericString(0),
-          shiftAllowance: toNumericString(shiftAllowance),
-          totRestPhAmount: toNumericString(0),
-          mobileAllowance: toNumericString(mobileAllowance),
-          transportAllowance: toNumericString(transportAllowance),
-          annualLeaveEncashment: toNumericString(0),
-          serviceCallAllowances: toNumericString(0),
-          otherAllowance: toNumericString(otherAllowance),
-          houseRentalAllowances: toNumericString(houseRentalAllowance),
-          loanRepaymentTotal: toNumericString(loanDeduction),
-          loanRepaymentDetails: loanDeduction > 0 ? `Recurring loan deduction: $${loanDeduction.toFixed(2)}` : null,
-          noPayDay: toNumericString(0),
-          cc: toNumericString(0),
-          cdac: toNumericString(shgCdac),
-          ecf: toNumericString(shgEcf),
-          mbmf: toNumericString(shgMbmf),
-          sinda: toNumericString(shgSinda),
-          advance: toNumericString(0),
-          bonus: toNumericString(0),
-          grossWages: toNumericString(grossWages),
-          cpfWages: toNumericString(cpfResult.cpfWages),
-          sdf: toNumericString(0),
-          fwl: toNumericString(0),
-          employerCpf: toNumericString(cpfResult.employerCPF),
-          employeeCpf: toNumericString(-cpfResult.employeeCPF), // Stored as negative (deduction)
-          totalCpf: toNumericString(cpfResult.totalCPF),
-          // Store original calculated CPF for override/revert functionality
-          originalEmployerCpf: toNumericString(cpfResult.employerCPF),
-          originalEmployeeCpf: toNumericString(-cpfResult.employeeCPF),
-          cpfOverridden: false,
-          total: toNumericString(grossWages),
-          nett: toNumericString(nett),
-          payMode: 'BANK',
-          chequeNo: null,
-          importedBy: (req.session as any)?.user?.id || 'system',
-        };
-
-        generatedRecords.push(record);
-      }
-
-      // Save all generated records
-      if (generatedRecords.length > 0) {
-        await storage.bulkCreatePayrollRecords(generatedRecords);
-      }
+      const result = await generatePayrollForPeriod(year, month, {
+        suppressAllOT,
+        employeeIds,
+        importedBy: (req.session as any)?.user?.id || 'system',
+      });
 
       res.json({
         success: true,
-        message: `Generated payroll for ${generatedRecords.length} employees`,
-        generated: generatedRecords.length,
-        skipped: skippedEmployees,
-        period: payPeriod,
+        message: `Generated payroll for ${result.generated} employees`,
+        ...result,
       });
     } catch (error) {
       console.error("Generate payroll error:", error);
@@ -5914,6 +5561,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Invalid request data", errors: error.errors });
       }
       res.status(500).json({ message: "Failed to preview payroll" });
+    }
+  });
+
+  // Get most recent payroll period that has records (admin only)
+  app.get("/api/admin/payroll/latest-period", requireAdmin, requireFullAdmin, async (req: Request, res: Response) => {
+    try {
+      const result = await db.execute(
+        sql`SELECT pay_period_year, pay_period_month
+            FROM app_nexahrsoft2.payroll_records
+            ORDER BY pay_period_year DESC, pay_period_month DESC
+            LIMIT 1`
+      );
+      const row = (result as any).rows?.[0] ?? (result as any)[0];
+      if (!row) return res.json({ year: null, month: null });
+      res.json({ year: row.pay_period_year, month: row.pay_period_month });
+    } catch (error) {
+      console.error("Get latest payroll period error:", error);
+      res.status(500).json({ message: "Failed to fetch latest period" });
     }
   });
 

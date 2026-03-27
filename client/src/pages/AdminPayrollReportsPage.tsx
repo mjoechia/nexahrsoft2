@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { toTitleCase } from "@/lib/utils";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import ExcelJS from "exceljs";
@@ -130,9 +130,36 @@ const initialFormState: NewUserForm = {
 export default function AdminPayrollReportsPage() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
-  const [selectedPeriod, setSelectedPeriod] = useState<string>(`${currentYear}-1`);
+  // Default to previous calendar month immediately (no blank flash while API loads)
+  const defaultPeriod = currentMonth === 1
+    ? `${currentYear - 1}-12`
+    : `${currentYear}-${currentMonth - 1}`;
+  const [selectedPeriod, setSelectedPeriod] = useState<string>(defaultPeriod);
   const [selectedPayslip, setSelectedPayslip] = useState<PayrollRecord | null>(null);
-  
+
+  // Fetch the most recently created payroll period and refine the default once
+  const { data: latestPeriod } = useQuery<{ year: number | null; month: number | null }>({
+    queryKey: ["/api/admin/payroll/latest-period"],
+    staleTime: Infinity,
+  });
+  const periodInitialized = useRef(false);
+
+  // Sticky horizontal scrollbar: mirror the table container's scroll at the viewport bottom
+  const tableScrollRef = useRef<HTMLDivElement>(null);
+  const mirrorScrollRef = useRef<HTMLDivElement>(null);
+  const [tableScrollWidth, setTableScrollWidth] = useState(0);
+  const isMirrorScrolling = useRef(false);
+  const isTableScrolling = useRef(false);
+  useEffect(() => {
+    if (!periodInitialized.current && latestPeriod) {
+      periodInitialized.current = true;
+      if (latestPeriod.year && latestPeriod.month) {
+        setSelectedPeriod(`${latestPeriod.year}-${latestPeriod.month}`);
+      }
+      // If no records exist yet, keep the "previous month" default
+    }
+  }, [latestPeriod]);
+
   const parsePeriod = (period: string) => {
     const [year, monthOrAll] = period.split('-');
     return {
@@ -140,7 +167,7 @@ export default function AdminPayrollReportsPage() {
       month: monthOrAll === 'all' ? '' : monthOrAll
     };
   };
-  
+
   const { year: selectedYear, month: selectedMonth } = parsePeriod(selectedPeriod);
   const [payslipDialogOpen, setPayslipDialogOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -388,6 +415,17 @@ export default function AdminPayrollReportsPage() {
         r.employeeCode.toLowerCase().includes(query)
     );
   }, [allRecords, searchQuery]);
+
+  // Re-measure table scroll width whenever records change so the mirror scrollbar stays accurate
+  useEffect(() => {
+    const el = tableScrollRef.current;
+    if (!el) return;
+    const update = () => setTableScrollWidth(el.scrollWidth);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [records]);
 
   const allEmployeeViewEnabled = useMemo(() => {
     if (allRecords.length === 0) return false;
@@ -1233,30 +1271,40 @@ export default function AdminPayrollReportsPage() {
               </div>
             </CardHeader>
             <CardContent>
-              <div className="overflow-x-auto">
+              <div className="relative">
+              <div
+                ref={tableScrollRef}
+                style={{ overflowX: "auto", overflowY: "auto", maxHeight: "65vh" }}
+                onScroll={(e) => {
+                  if (isMirrorScrolling.current) return;
+                  isTableScrolling.current = true;
+                  if (mirrorScrollRef.current) mirrorScrollRef.current.scrollLeft = e.currentTarget.scrollLeft;
+                  isTableScrolling.current = false;
+                }}
+              >
                 <table className="w-full text-sm" data-testid="table-payroll-records">
                   <thead>
-                    <tr className="border-b bg-muted/50">
-                      <th className="text-center p-2 font-medium w-10">No</th>
-                      <th className="text-left p-2 font-medium">Employee Name</th>
-                      <th className="text-right p-2 font-medium">Basic Salary</th>
-                      <th className="text-right p-2 font-medium">Shift</th>
-                      <th className="text-right p-2 font-medium">Mobile</th>
-                      <th className="text-right p-2 font-medium">Transport</th>
-                      <th className="text-right p-2 font-medium">Other All</th>
-                      <th className="text-right p-2 font-medium">Gross</th>
-                      <th className="text-right p-2 font-medium">Emp CPF</th>
-                      <th className="text-right p-2 font-medium">Advance</th>
-                      <th className="text-right p-2 font-medium">A/L</th>
-                      <th className="text-right p-2 font-medium">SINDA</th>
-                      <th className="text-right p-2 font-medium">MBMF</th>
-                      <th className="text-right p-2 font-medium">Loan</th>
-                      <th className="text-right p-2 font-medium">Salary</th>
-                      <th className="text-right p-2 font-medium">{selectedMonth ? `${MONTH_ABBR[parseInt(selectedMonth)]} ` : ''}OT 1.5x</th>
-                      <th className="text-right p-2 font-medium">{selectedMonth ? `${MONTH_ABBR[parseInt(selectedMonth)]} ` : ''}OT 2.0x</th>
-                      <th className="text-right p-2 font-medium">Final Sal</th>
-                      <th className="text-left p-2 font-medium">REMARKS</th>
-                      <th className="text-center p-2 font-medium">Actions</th>
+                    <tr className="sticky top-0 z-10 border-b">
+                      <th className="text-center p-2 font-medium w-10 bg-muted">No</th>
+                      <th className="text-left p-2 font-medium bg-muted">Employee Name</th>
+                      <th className="text-right p-2 font-medium bg-muted">Basic Salary</th>
+                      <th className="text-right p-2 font-medium bg-muted">Shift</th>
+                      <th className="text-right p-2 font-medium bg-muted">Mobile</th>
+                      <th className="text-right p-2 font-medium bg-muted">Transport</th>
+                      <th className="text-right p-2 font-medium bg-muted">Other All</th>
+                      <th className="text-right p-2 font-medium bg-muted">Gross</th>
+                      <th className="text-right p-2 font-medium bg-muted">Emp CPF</th>
+                      <th className="text-right p-2 font-medium bg-muted">Advance</th>
+                      <th className="text-right p-2 font-medium bg-muted">A/L</th>
+                      <th className="text-right p-2 font-medium bg-muted">SINDA</th>
+                      <th className="text-right p-2 font-medium bg-muted">MBMF</th>
+                      <th className="text-right p-2 font-medium bg-muted">Loan</th>
+                      <th className="text-right p-2 font-medium bg-muted">Salary</th>
+                      <th className="text-right p-2 font-medium bg-muted">{selectedMonth ? `${MONTH_ABBR[parseInt(selectedMonth)]} ` : ''}OT 1.5x</th>
+                      <th className="text-right p-2 font-medium bg-muted">{selectedMonth ? `${MONTH_ABBR[parseInt(selectedMonth)]} ` : ''}OT 2.0x</th>
+                      <th className="text-right p-2 font-medium bg-muted">Final Sal</th>
+                      <th className="text-left p-2 font-medium bg-muted">REMARKS</th>
+                      <th className="text-center p-2 font-medium bg-muted">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1400,6 +1448,20 @@ export default function AdminPayrollReportsPage() {
                     ))}
                   </tbody>
                 </table>
+              </div>
+              {/* Sticky mirror scrollbar — sticks to viewport bottom so it's always reachable */}
+              <div
+                ref={mirrorScrollRef}
+                style={{ overflowX: "auto", overflowY: "hidden", position: "sticky", bottom: 0 }}
+                onScroll={(e) => {
+                  if (isTableScrolling.current) return;
+                  isMirrorScrolling.current = true;
+                  if (tableScrollRef.current) tableScrollRef.current.scrollLeft = e.currentTarget.scrollLeft;
+                  isMirrorScrolling.current = false;
+                }}
+              >
+                <div style={{ width: tableScrollWidth, height: 1 }} />
+              </div>
               </div>
             </CardContent>
           </Card>

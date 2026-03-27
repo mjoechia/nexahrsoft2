@@ -159,8 +159,6 @@ export default function AdminSettingsPage() {
   const [companyName, setCompanyName] = useState<string>("");
   const [companyAddress, setCompanyAddress] = useState<string>("");
   const [companyUen, setCompanyUen] = useState<string>("");
-  const [ignoreOrphanedSessions, setIgnoreOrphanedSessions] = useState<boolean>(false);
-  
   const [csvFile, setCsvFile] = useState<File | null>(null);
   const [parsedEmployees, setParsedEmployees] = useState<ParsedEmployee[]>([]);
   const [csvErrors, setCsvErrors] = useState<string[]>([]);
@@ -230,9 +228,6 @@ export default function AdminSettingsPage() {
     }
     if (settings?.companyUen) {
       setCompanyUen(settings.companyUen);
-    }
-    if (settings?.ignoreOrphanedSessions !== undefined) {
-      setIgnoreOrphanedSessions(settings.ignoreOrphanedSessions);
     }
   }, [settings]);
 
@@ -729,31 +724,6 @@ export default function AdminSettingsPage() {
 
   const handleUpdateTimezone = () => {
     updateTimezoneMutation.mutate(defaultTimezone);
-  };
-
-  // Orphaned sessions setting mutation
-  const updateOrphanedSettingMutation = useMutation({
-    mutationFn: async (ignore: boolean) => {
-      await apiRequest("PUT", "/api/company/orphaned-setting", { ignoreOrphanedSessions: ignore });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/company/settings"] });
-      toast({
-        title: "Success",
-        description: "Orphaned sessions setting updated successfully",
-      });
-    },
-    onError: (error: Error) => {
-      toast({
-        title: "Update Failed",
-        description: error.message,
-        variant: "destructive",
-      });
-    },
-  });
-
-  const handleUpdateOrphanedSetting = () => {
-    updateOrphanedSettingMutation.mutate(ignoreOrphanedSessions);
   };
 
   // Company info mutation
@@ -1550,43 +1520,6 @@ export default function AdminSettingsPage() {
               data-testid="button-update-timezone"
             >
               {updateTimezoneMutation.isPending ? "Updating..." : "Update Timezone"}
-            </Button>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Clock className="h-5 w-5" />
-              Orphaned Sessions
-            </CardTitle>
-            <CardDescription>
-              Configure how orphaned attendance sessions are handled
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="space-y-1">
-                <Label htmlFor="ignore-orphaned">Ignore Orphaned Sessions</Label>
-                <p className="text-xs text-muted-foreground">
-                  When enabled, employees can clock in even if they have unclosed sessions older than 24 hours.
-                  The Orphaned button will be hidden from the Attendance page.
-                </p>
-              </div>
-              <Switch
-                id="ignore-orphaned"
-                checked={ignoreOrphanedSessions}
-                onCheckedChange={setIgnoreOrphanedSessions}
-                disabled={isViewOnlyAdmin}
-                data-testid="switch-ignore-orphaned"
-              />
-            </div>
-            <Button
-              onClick={handleUpdateOrphanedSetting}
-              disabled={updateOrphanedSettingMutation.isPending || isViewOnlyAdmin}
-              data-testid="button-update-orphaned-setting"
-            >
-              {updateOrphanedSettingMutation.isPending ? "Updating..." : "Update Setting"}
             </Button>
           </CardContent>
         </Card>

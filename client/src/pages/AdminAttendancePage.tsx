@@ -475,12 +475,6 @@ export default function AdminAttendancePage() {
   const [editingRemarkUserId, setEditingRemarkUserId] = useState<string | null>(null);
   const [editingRemarkValue, setEditingRemarkValue] = useState("");
 
-  // Fetch company settings to check ignoreOrphanedSessions flag
-  const { data: companySettings } = useQuery<CompanySettings>({
-    queryKey: ['/api/company/settings'],
-  });
-  const ignoreOrphanedSessions = companySettings?.ignoreOrphanedSessions ?? false;
-  
   // State for selected orphaned records
   const [selectedOrphanedIds, setSelectedOrphanedIds] = useState<Set<string>>(new Set());
   const [bulkClockOutTime, setBulkClockOutTime] = useState("18:00");
@@ -1713,23 +1707,21 @@ export default function AdminAttendancePage() {
             <CalendarCheck className="h-4 w-4 mr-1" />
             Clock-ins
           </Button>
-          {!ignoreOrphanedSessions && (
-            <Button
-              variant={viewMode === 'orphaned' ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => setViewMode('orphaned')}
-              data-testid="button-view-orphaned"
-              className={orphanedSessions.length > 0 ? "relative" : ""}
-            >
-              <AlertTriangle className="h-4 w-4 mr-1" />
-              Orphaned
-              {orphanedSessions.length > 0 && (
-                <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-4 w-4 flex items-center justify-center">
-                  {orphanedSessions.length}
-                </span>
-              )}
-            </Button>
-          )}
+          <Button
+            variant={viewMode === 'orphaned' ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setViewMode('orphaned')}
+            data-testid="button-view-orphaned"
+            className={orphanedSessions.length > 0 ? "relative" : ""}
+          >
+            <AlertTriangle className="h-4 w-4 mr-1" />
+            Orphaned
+            {orphanedSessions.length > 0 && (
+              <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-4 w-4 flex items-center justify-center">
+                {orphanedSessions.length}
+              </span>
+            )}
+          </Button>
           <Button
             variant={viewMode === 'heatmap' ? 'default' : 'outline'}
             size="sm"

@@ -7,6 +7,7 @@ import { createClient } from "@supabase/supabase-js";
 import { sql } from "drizzle-orm";
 import { db } from "./db";
 import { registerRoutes } from "./routes";
+import { startCronJobs } from "./cron";
 import { setupVite, serveStatic, log } from "./vite";
 
 // Ensure Supabase Storage buckets exist and clear stale disk-based URLs
@@ -447,6 +448,17 @@ async function ensureSchemaMigrations(pool: Pool) {
       console.log("leave_history user_id column already exists");
     }
 
+    // Add unique constraint on payroll_records to prevent duplicate generation (race-safe)
+    await pool.query(`
+      DO $$ BEGIN
+        ALTER TABLE payroll_records
+          ADD CONSTRAINT payroll_records_unique_employee_period
+          UNIQUE (user_id, pay_period_year, pay_period_month);
+      EXCEPTION WHEN duplicate_object THEN NULL;
+      END $$;
+    `);
+    console.log("payroll_records unique constraint ready");
+
     log("Schema migrations verified successfully");
   } catch (error: any) {
     // Log detailed error for debugging - this is critical for production
@@ -568,6 +580,9 @@ app.use((req, res, next) => {
   await ensureSchemaMigrations(sessionPool);
 
   const server = await registerRoutes(app);
+
+  // Start background cron jobs (auto-archive past resignations, auto-generate payroll, etc.)
+  await startCronJobs();
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
