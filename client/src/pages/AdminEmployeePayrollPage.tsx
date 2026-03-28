@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { ArrowLeft, Users, DollarSign, Save, Loader2, History, User, Building, Calendar, X, Search, AlertCircle, CheckCircle2, Edit, Plus, Trash2, PlusCircle, MinusCircle } from "lucide-react";
+import { ArrowLeft, Users, DollarSign, Save, Loader2, RefreshCw, History, User, Building, Calendar, X, Search, AlertCircle, CheckCircle2, Edit, Plus, Trash2, PlusCircle, MinusCircle } from "lucide-react";
 import { useLocation } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -194,6 +194,7 @@ export default function AdminEmployeePayrollPage() {
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [urlParamProcessed, setUrlParamProcessed] = useState(false);
   const [returnToGenerate, setReturnToGenerate] = useState<string | null>(null);
+  const [openedViaUrlParam, setOpenedViaUrlParam] = useState(false);
 
   const { data: employeeList, isLoading: isLoadingList, error: listError } = useQuery<{ employees: EmployeePayrollSummary[] }>({
     queryKey: ["/api/admin/employees/payroll-list"],
@@ -213,7 +214,8 @@ export default function AdminEmployeePayrollPage() {
         if (employee) {
           setSelectedEmployeeId(employeeId);
           setEditDialogOpen(true);
-          
+          setOpenedViaUrlParam(true);
+
           // Store return info if coming from generate page
           if (returnTo === 'generate' && period) {
             setReturnToGenerate(period);
@@ -224,13 +226,17 @@ export default function AdminEmployeePayrollPage() {
     }
   }, [employeeList, urlParamProcessed]);
   
-  // Handle dialog close - return to generate page if came from there
+  // Handle dialog close - navigate back to the originating page
   const handleDialogClose = (open: boolean) => {
     setEditDialogOpen(open);
-    if (!open && returnToGenerate) {
-      // Navigate back to generate payroll page with the period
-      setLocation(`/admin/payroll/generate`);
-      setReturnToGenerate(null);
+    if (!open) {
+      if (returnToGenerate) {
+        setLocation('/admin/payroll/generate');
+        setReturnToGenerate(null);
+      } else if (openedViaUrlParam) {
+        setLocation('/admin/payroll');
+        setOpenedViaUrlParam(false);
+      }
     }
   };
 
@@ -254,57 +260,50 @@ export default function AdminEmployeePayrollPage() {
   };
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="space-y-4">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => setLocation("/admin/payroll")}
-          data-testid="button-back"
-          className="text-muted-foreground hover:text-foreground"
-        >
-          <ArrowLeft className="h-4 w-4 mr-1" />
-          Back to Payroll Management
-        </Button>
-        <div className="flex items-center gap-4">
-          <div>
-            <h1 className="text-2xl font-bold flex items-center gap-2">
-              <Users className="h-6 w-6" />
-              Employee Payroll Settings
-            </h1>
-            <p className="text-sm text-muted-foreground">
-              Configure employee residency status, monthly salary, and allowances
-            </p>
-          </div>
+    <div className="min-h-screen bg-muted/30 p-4 md:p-8">
+    <div className="max-w-7xl mx-auto space-y-6">
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        <div>
+          <h1 className="text-2xl md:text-3xl font-bold">Employee Payroll Settings</h1>
+          <p className="text-sm md:text-base text-muted-foreground">
+            Configure employee residency status, monthly salary, and allowances
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={() => setLocation("/admin/payroll")}
+            data-testid="button-back"
+          >
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back to Payroll Management
+          </Button>
         </div>
       </div>
 
       <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between gap-4 flex-wrap">
-            <CardTitle className="flex items-center gap-2">
-              <Building className="h-5 w-5" />
-              Employee List
-            </CardTitle>
-            <div className="relative w-64">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+        <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-4">
+          <CardTitle className="flex items-center gap-2">
+            <Building className="h-5 w-5" />
+            Employees ({filteredEmployees.length})
+          </CardTitle>
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
                 placeholder="Search employees..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-9"
-                data-testid="input-search-employees"
+                className="pl-9 w-48"
+                data-testid="input-search"
               />
             </div>
           </div>
-          <CardDescription>
-            {filteredEmployees.length} employee(s) found
-          </CardDescription>
         </CardHeader>
         <CardContent>
           {isLoadingList ? (
             <div className="flex items-center justify-center py-12">
-              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+              <RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" />
             </div>
           ) : listError ? (
             <div className="text-center py-12">
@@ -316,7 +315,7 @@ export default function AdminEmployeePayrollPage() {
             </div>
           ) : filteredEmployees.length === 0 ? (
             <div className="text-center py-12 text-muted-foreground">
-              No employees found
+              No employees found matching your criteria
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -387,13 +386,12 @@ export default function AdminEmployeePayrollPage() {
                       </TableCell>
                       <TableCell className="text-right">
                         <Button
-                          variant="outline"
-                          size="sm"
+                          variant="ghost"
+                          size="icon"
                           onClick={() => handleEditEmployee(employee.id)}
                           data-testid={`button-edit-${employee.id}`}
                         >
-                          <Edit className="h-4 w-4 mr-1" />
-                          Edit
+                          <Edit className="h-4 w-4" />
                         </Button>
                       </TableCell>
                     </TableRow>
@@ -416,6 +414,7 @@ export default function AdminEmployeePayrollPage() {
           if (!open) setSelectedEmployeeId(null);
         }}
       />
+    </div>
     </div>
   );
 }
