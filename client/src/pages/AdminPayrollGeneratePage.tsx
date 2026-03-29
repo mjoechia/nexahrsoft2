@@ -157,7 +157,7 @@ export default function AdminPayrollGeneratePage() {
   const [selectedPeriod, setSelectedPeriod] = useState<string>(`${currentYear}-${currentMonth}`);
   const [previewData, setPreviewData] = useState<PreviewResponse | null>(null);
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
-  const [suppressAllOT, setSuppressAllOT] = useState(false);
+  const [suppressAllOT, setSuppressAllOT] = useState(true);
   const [previewSearchQuery, setPreviewSearchQuery] = useState("");
 
   const { data: masterAdminData } = useQuery<{ isMasterAdmin: boolean }>({
@@ -255,7 +255,7 @@ export default function AdminPayrollGeneratePage() {
       'Shift',
       'Mobile',
       'Transport',
-      'Other All',
+      'O. Allow.',
       'Gross',
       'Emp CPF',
       'Advance',
@@ -371,7 +371,7 @@ export default function AdminPayrollGeneratePage() {
               <th style="text-align: right;">Shift</th>
               <th style="text-align: right;">Mobile</th>
               <th style="text-align: right;">Transport</th>
-              <th style="text-align: right;">Other All</th>
+              <th style="text-align: right;">O. Allow.</th>
               <th style="text-align: right;">Gross</th>
               <th style="text-align: right;">Emp CPF</th>
               <th style="text-align: right;">Advance</th>
@@ -709,7 +709,7 @@ export default function AdminPayrollGeneratePage() {
                         <TableHead className="text-right">Shift</TableHead>
                         <TableHead className="text-right">Mobile</TableHead>
                         <TableHead className="text-right">Transport</TableHead>
-                        <TableHead className="text-right">Other All</TableHead>
+                        <TableHead className="text-right">O. Allow.</TableHead>
                         <TableHead className="text-right font-semibold">Gross</TableHead>
                         <TableHead className="text-right">Emp CPF</TableHead>
                         <TableHead className="text-right">Advance</TableHead>

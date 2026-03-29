@@ -238,6 +238,41 @@ async function seedDefaultUser() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Auto-regenerate payroll when attendance adjustments change
+// ---------------------------------------------------------------------------
+const regenLocks = new Map<string, boolean>();
+const regenTimers = new Map<string, NodeJS.Timeout>();
+
+function triggerAutoPayrollRegen(date: string) {
+  const [yearStr, monthStr] = date.split('-');
+  const autoYear = parseInt(yearStr, 10);
+  const autoMonth = parseInt(monthStr, 10);
+  const key = `${autoYear}-${autoMonth}`;
+
+  clearTimeout(regenTimers.get(key));
+  regenTimers.set(key, setTimeout(async () => {
+    if (regenLocks.get(key)) return;
+    regenLocks.set(key, true);
+    try {
+      const existing = await storage.getPayrollRecords(autoYear, autoMonth);
+      if (existing.length > 0) {
+        await storage.deletePayrollRecordsByPeriod(autoYear, autoMonth);
+        const { generatePayrollForPeriod } = await import("./payrollService");
+        await generatePayrollForPeriod(autoYear, autoMonth, {
+          suppressAllOT: true,
+          importedBy: 'auto-regen',
+        });
+        console.log(`[auto-regen] Payroll regenerated for ${autoMonth}/${autoYear}`);
+      }
+    } catch (err) {
+      console.error('[auto-regen] Payroll regeneration failed:', { error: err, year: autoYear, month: autoMonth });
+    } finally {
+      regenLocks.delete(key);
+    }
+  }, 1000));
+}
+
 export async function registerRoutes(app: Express): Promise<Server> {
   // Seed default user on startup
   await seedDefaultUser();
@@ -2574,6 +2609,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
         res.json({ adjustment: newAdjustment, message: "Attendance adjustment created" });
       }
+      triggerAutoPayrollRegen(date as string);
     } catch (error: any) {
       console.error("=== ATTENDANCE ADJUSTMENT ERROR ===");
       console.error("Error message:", error.message);
@@ -2600,6 +2636,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       await storage.deleteAttendanceAdjustment(id);
       res.json({ message: "Attendance adjustment deleted, reverting to actual clock-in data" });
+      triggerAutoPayrollRegen(adjustment.date as string);
     } catch (error: any) {
       console.error("Delete attendance adjustment error:", error);
       res.status(500).json({ message: "Failed to delete attendance adjustment" });

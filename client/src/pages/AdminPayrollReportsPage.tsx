@@ -494,7 +494,7 @@ export default function AdminPayrollReportsPage() {
     const monthPrefix = selectedMonth ? `${MONTH_ABBR[parseInt(selectedMonth)]} ` : '';
     const headers = [
       "No", "Employee Name", "Basic Salary",
-      "Shift", "Mobile", "Transport", "Other All",
+      "Shift", "Mobile", "Transport", "O. Allow.",
       "Gross", "Emp CPF", "Advance", "A/L",
       "SINDA", "MBMF",
       "Loan", "Salary",
@@ -569,7 +569,7 @@ export default function AdminPayrollReportsPage() {
     const xlMonthPrefix = selectedMonth ? `${MONTH_ABBR[parseInt(selectedMonth)]} ` : '';
     const xlHeaders = [
       "No", "Employee Name", "Basic Salary",
-      "Shift", "Mobile", "Transport", "Other All",
+      "Shift", "Mobile", "Transport", "O. Allow.",
       "Gross", "Emp CPF", "Advance", "A/L",
       "SINDA", "MBMF",
       "Loan", "Salary",
@@ -1292,7 +1292,7 @@ export default function AdminPayrollReportsPage() {
                       <th className="text-right p-2 font-medium bg-muted">Shift</th>
                       <th className="text-right p-2 font-medium bg-muted">Mobile</th>
                       <th className="text-right p-2 font-medium bg-muted">Transport</th>
-                      <th className="text-right p-2 font-medium bg-muted">Other All</th>
+                      <th className="text-right p-2 font-medium bg-muted">O. Allow.</th>
                       <th className="text-right p-2 font-medium bg-muted">Gross</th>
                       <th className="text-right p-2 font-medium bg-muted">Emp CPF</th>
                       <th className="text-right p-2 font-medium bg-muted">Advance</th>
