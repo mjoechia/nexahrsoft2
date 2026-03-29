@@ -700,6 +700,7 @@ function EditEmployeeDialog({ employeeId, employeeName, employeeCode, open, onOp
       queryClient.invalidateQueries({ queryKey: ["/api/admin/employees/payroll-list"] });
       queryClient.invalidateQueries({ queryKey: [`/api/admin/employees/${employeeId}/payroll-settings`] });
       queryClient.invalidateQueries({ queryKey: [`/api/admin/employees/${employeeId}/audit-logs`] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/payroll/records"] });
       setFormState({});
       onOpenChange(false);
     },
