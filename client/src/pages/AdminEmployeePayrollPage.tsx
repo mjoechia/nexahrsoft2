@@ -84,6 +84,8 @@ interface EmployeePayrollSettings {
   defaultMealAllowance: number | null;
   defaultShiftAllowance: number | null;
   defaultOtherAllowance: number | null;
+  defaultOtherAllowance1: number | null;
+  defaultOtherAllowance2: number | null;
   defaultHouseRentalAllowance: number | null;
   salaryAdjustment: number | null;
   salaryAdjustmentReason: string | null;
@@ -575,6 +577,8 @@ function EditEmployeeDialog({ employeeId, employeeName, employeeCode, open, onOp
     meal: "",
     shift: "",
     other: "",
+    other1: "",
+    other2: "",
     houseRental: "",
   });
   const [allowancesDirty, setAllowancesDirty] = useState(false);
@@ -606,6 +610,8 @@ function EditEmployeeDialog({ employeeId, employeeName, employeeCode, open, onOp
         meal: dollarsToDisplay(settings.defaultMealAllowance ?? null),
         shift: dollarsToDisplay(settings.defaultShiftAllowance ?? null),
         other: dollarsToDisplay(settings.defaultOtherAllowance ?? null),
+        other1: dollarsToDisplay(settings.defaultOtherAllowance1 ?? null),
+        other2: dollarsToDisplay(settings.defaultOtherAllowance2 ?? null),
         houseRental: dollarsToDisplay(settings.defaultHouseRentalAllowance ?? null),
       });
     }
@@ -675,6 +681,12 @@ function EditEmployeeDialog({ employeeId, employeeName, employeeCode, open, onOp
       }
       if (formState.defaultOtherAllowance !== undefined) {
         updates.defaultOtherAllowance = formState.defaultOtherAllowance;
+      }
+      if (formState.defaultOtherAllowance1 !== undefined) {
+        updates.defaultOtherAllowance1 = formState.defaultOtherAllowance1;
+      }
+      if (formState.defaultOtherAllowance2 !== undefined) {
+        updates.defaultOtherAllowance2 = formState.defaultOtherAllowance2;
       }
       if (formState.defaultHouseRentalAllowance !== undefined) {
         updates.defaultHouseRentalAllowance = formState.defaultHouseRentalAllowance;
@@ -1131,6 +1143,32 @@ function EditEmployeeDialog({ employeeId, employeeName, employeeCode, open, onOp
                             onKeyDown={allowanceKeyDownHandler}
                             onBlur={() => handleAllowanceBlur("other", "defaultOtherAllowance")}
                             data-testid="input-other-allowance"
+                          />
+                        </div>
+                        <div>
+                          <Label>Other Allowance 1 ($)</Label>
+                          <Input
+                            type="text"
+                            inputMode="decimal"
+                            placeholder="0.00"
+                            value={allowanceInputs.other1}
+                            onChange={(e) => handleAllowanceChange("other1", e.target.value)}
+                            onKeyDown={allowanceKeyDownHandler}
+                            onBlur={() => handleAllowanceBlur("other1", "defaultOtherAllowance1")}
+                            data-testid="input-other-allowance-1"
+                          />
+                        </div>
+                        <div>
+                          <Label>Other Allowance 2 ($)</Label>
+                          <Input
+                            type="text"
+                            inputMode="decimal"
+                            placeholder="0.00"
+                            value={allowanceInputs.other2}
+                            onChange={(e) => handleAllowanceChange("other2", e.target.value)}
+                            onKeyDown={allowanceKeyDownHandler}
+                            onBlur={() => handleAllowanceBlur("other2", "defaultOtherAllowance2")}
+                            data-testid="input-other-allowance-2"
                           />
                         </div>
                         <div>

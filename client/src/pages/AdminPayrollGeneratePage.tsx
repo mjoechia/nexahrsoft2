@@ -89,6 +89,8 @@ interface PreviewEmployee {
   mealAllowance: number;
   shiftAllowance: number;
   otherAllowance: number;
+  otherAllowance1: number;
+  otherAllowance2: number;
   houseRentalAllowance: number;
   loanDeduction: number;
   advance: number;
@@ -256,6 +258,8 @@ export default function AdminPayrollGeneratePage() {
       'Mobile',
       'Transport',
       'O. Allow.',
+      'O. Allow. 1',
+      'O. Allow. 2',
       'Gross',
       'Emp CPF',
       'Advance',
@@ -282,6 +286,8 @@ export default function AdminPayrollGeneratePage() {
           (emp.mobileAllowance || 0).toFixed(2),
           (emp.transportAllowance || 0).toFixed(2),
           (emp.otherAllowance || 0).toFixed(2),
+          (emp.otherAllowance1 || 0).toFixed(2),
+          (emp.otherAllowance2 || 0).toFixed(2),
           emp.grossWages.toFixed(2),
           emp.employeeCPF.toFixed(2),
           (emp.advance || 0).toFixed(2),
@@ -332,6 +338,8 @@ export default function AdminPayrollGeneratePage() {
           <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">$${(emp.mobileAllowance || 0).toFixed(2)}</td>
           <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">$${(emp.transportAllowance || 0).toFixed(2)}</td>
           <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">$${(emp.otherAllowance || 0).toFixed(2)}</td>
+          <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">$${(emp.otherAllowance1 || 0).toFixed(2)}</td>
+          <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">$${(emp.otherAllowance2 || 0).toFixed(2)}</td>
           <td style="padding: 8px; border: 1px solid #ddd; text-align: right; font-weight: bold;">$${emp.grossWages.toFixed(2)}</td>
           <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">$${emp.employeeCPF.toFixed(2)}</td>
           <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">$${(emp.advance || 0).toFixed(2)}</td>
@@ -372,6 +380,8 @@ export default function AdminPayrollGeneratePage() {
               <th style="text-align: right;">Mobile</th>
               <th style="text-align: right;">Transport</th>
               <th style="text-align: right;">O. Allow.</th>
+              <th style="text-align: right;">O. Allow. 1</th>
+              <th style="text-align: right;">O. Allow. 2</th>
               <th style="text-align: right;">Gross</th>
               <th style="text-align: right;">Emp CPF</th>
               <th style="text-align: right;">Advance</th>
@@ -710,6 +720,8 @@ export default function AdminPayrollGeneratePage() {
                         <TableHead className="text-right">Mobile</TableHead>
                         <TableHead className="text-right">Transport</TableHead>
                         <TableHead className="text-right">O. Allow.</TableHead>
+                        <TableHead className="text-right">O. Allow. 1</TableHead>
+                        <TableHead className="text-right">O. Allow. 2</TableHead>
                         <TableHead className="text-right font-semibold">Gross</TableHead>
                         <TableHead className="text-right">Emp CPF</TableHead>
                         <TableHead className="text-right">Advance</TableHead>
@@ -741,6 +753,8 @@ export default function AdminPayrollGeneratePage() {
                           <TableCell className="text-right">{formatCurrency(emp.mobileAllowance || 0)}</TableCell>
                           <TableCell className="text-right">{formatCurrency(emp.transportAllowance || 0)}</TableCell>
                           <TableCell className="text-right">{formatCurrency(emp.otherAllowance || 0)}</TableCell>
+                          <TableCell className="text-right">{formatCurrency(emp.otherAllowance1 || 0)}</TableCell>
+                          <TableCell className="text-right">{formatCurrency(emp.otherAllowance2 || 0)}</TableCell>
                           <TableCell className="text-right font-medium">{formatCurrency(emp.grossWages)}</TableCell>
                           <TableCell className="text-right">{formatCurrency(emp.employeeCPF)}</TableCell>
                           <TableCell className="text-right">{formatCurrency(emp.advance || 0)}</TableCell>

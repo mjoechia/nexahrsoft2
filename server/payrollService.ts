@@ -298,10 +298,13 @@ export async function generatePayrollForPeriod(
     const mealAllowance = parseFloat(employee.defaultMealAllowance || "0");
     const shiftAllowance = parseFloat(employee.defaultShiftAllowance || "0");
     const otherAllowance = parseFloat(employee.defaultOtherAllowance || "0");
+    const otherAllowance1 = parseFloat(employee.defaultOtherAllowance1 || "0");
+    const otherAllowance2 = parseFloat(employee.defaultOtherAllowance2 || "0");
     const houseRentalAllowance = parseFloat(employee.defaultHouseRentalAllowance || "0");
     const loanDeduction = 0;
     const totalAllowances =
-      mobileAllowance + transportAllowance + mealAllowance + shiftAllowance + otherAllowance + houseRentalAllowance;
+      mobileAllowance + transportAllowance + mealAllowance + shiftAllowance
+      + otherAllowance + otherAllowance1 + otherAllowance2 + houseRentalAllowance;
 
     const grossWages = calculatedBasicPay + finalOtAmount + totalAllowances;
 
@@ -386,6 +389,8 @@ export async function generatePayrollForPeriod(
       annualLeaveEncashment: toNumericString(0),
       serviceCallAllowances: toNumericString(0),
       otherAllowance: toNumericString(otherAllowance),
+      otherAllowance1: toNumericString(otherAllowance1),
+      otherAllowance2: toNumericString(otherAllowance2),
       houseRentalAllowances: toNumericString(houseRentalAllowance),
       loanRepaymentTotal: toNumericString(loanDeduction),
       loanRepaymentDetails: loanDeduction > 0 ? `Recurring loan deduction: $${loanDeduction.toFixed(2)}` : null,

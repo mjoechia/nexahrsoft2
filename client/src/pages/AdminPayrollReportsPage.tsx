@@ -494,7 +494,7 @@ export default function AdminPayrollReportsPage() {
     const monthPrefix = selectedMonth ? `${MONTH_ABBR[parseInt(selectedMonth)]} ` : '';
     const headers = [
       "No", "Employee Name", "Basic Salary",
-      "Shift", "Mobile", "Transport", "O. Allow.",
+      "Shift", "Mobile", "Transport", "O. Allow.", "O. Allow. 1", "O. Allow. 2",
       "Gross", "Emp CPF", "Advance", "A/L",
       "SINDA", "MBMF",
       "Loan", "Salary",
@@ -517,6 +517,8 @@ export default function AdminPayrollReportsPage() {
         parseAmount(r.mobileAllowance).toFixed(2),
         parseAmount(r.transportAllowance).toFixed(2),
         parseAmount(r.otherAllowance).toFixed(2),
+        parseAmount((r as any).otherAllowance1).toFixed(2),
+        parseAmount((r as any).otherAllowance2).toFixed(2),
         parseAmount(r.grossWages).toFixed(2),
         parseAmount(r.employeeCpf).toFixed(2),
         parseAmount(r.advance).toFixed(2),
@@ -569,7 +571,7 @@ export default function AdminPayrollReportsPage() {
     const xlMonthPrefix = selectedMonth ? `${MONTH_ABBR[parseInt(selectedMonth)]} ` : '';
     const xlHeaders = [
       "No", "Employee Name", "Basic Salary",
-      "Shift", "Mobile", "Transport", "O. Allow.",
+      "Shift", "Mobile", "Transport", "O. Allow.", "O. Allow. 1", "O. Allow. 2",
       "Gross", "Emp CPF", "Advance", "A/L",
       "SINDA", "MBMF",
       "Loan", "Salary",
@@ -611,6 +613,8 @@ export default function AdminPayrollReportsPage() {
         parseAmount(r.mobileAllowance),
         parseAmount(r.transportAllowance),
         parseAmount(r.otherAllowance),
+        parseAmount((r as any).otherAllowance1),
+        parseAmount((r as any).otherAllowance2),
         parseAmount(r.grossWages),
         parseAmount(r.employeeCpf),
         parseAmount(r.advance),
@@ -1293,6 +1297,8 @@ export default function AdminPayrollReportsPage() {
                       <th className="text-right p-2 font-medium bg-muted">Mobile</th>
                       <th className="text-right p-2 font-medium bg-muted">Transport</th>
                       <th className="text-right p-2 font-medium bg-muted">O. Allow.</th>
+                      <th className="text-right p-2 font-medium bg-muted">O. Allow. 1</th>
+                      <th className="text-right p-2 font-medium bg-muted">O. Allow. 2</th>
                       <th className="text-right p-2 font-medium bg-muted">Gross</th>
                       <th className="text-right p-2 font-medium bg-muted">Emp CPF</th>
                       <th className="text-right p-2 font-medium bg-muted">Advance</th>
@@ -1322,6 +1328,8 @@ export default function AdminPayrollReportsPage() {
                         <td className="p-2 text-right font-mono" data-testid={`cell-mobile-${idx}`}>{formatCurrency(row.mobileAllowance)}</td>
                         <td className="p-2 text-right font-mono" data-testid={`cell-transport-${idx}`}>{formatCurrency(row.transportAllowance)}</td>
                         <td className="p-2 text-right font-mono" data-testid={`cell-other-${idx}`}>{formatCurrency(row.otherAllowance)}</td>
+                        <td className="p-2 text-right font-mono" data-testid={`cell-other1-${idx}`}>{formatCurrency((row as any).otherAllowance1)}</td>
+                        <td className="p-2 text-right font-mono" data-testid={`cell-other2-${idx}`}>{formatCurrency((row as any).otherAllowance2)}</td>
                         <td className="p-2 text-right font-mono font-medium" data-testid={`cell-gross-${idx}`}>{formatCurrency(row.grossWages)}</td>
                         <td className="p-2 text-right font-mono" data-testid={`cell-employee-cpf-${idx}`}>{formatCurrency(row.employeeCpf)}</td>
                         <td className="p-2 text-right font-mono" data-testid={`cell-advance-${idx}`}>{formatCurrency(row.advance)}</td>
@@ -1553,7 +1561,7 @@ export default function AdminPayrollReportsPage() {
             const otTotal = parseAmount(noCpfRecord.flat) + parseAmount(noCpfRecord.ot10) + parseAmount(noCpfRecord.ot15) + parseAmount(noCpfRecord.ot20) + parseAmount(noCpfRecord.ot30) + parseAmount(noCpfRecord.totRestPhAmount);
             const shiftAllowance = parseAmount(noCpfRecord.shiftAllowance);
             const allowancesWithCpf = parseAmount(noCpfRecord.mobileAllowance) + parseAmount(noCpfRecord.transportAllowance) + parseAmount(noCpfRecord.annualLeaveEncashment) + parseAmount(noCpfRecord.serviceCallAllowances);
-            const allowancesWithoutCpf = parseAmount(noCpfRecord.otherAllowance) + parseAmount(noCpfRecord.houseRentalAllowances);
+            const allowancesWithoutCpf = parseAmount(noCpfRecord.otherAllowance) + parseAmount((noCpfRecord as any).otherAllowance1) + parseAmount((noCpfRecord as any).otherAllowance2) + parseAmount(noCpfRecord.houseRentalAllowances);
             const bonusAmt = parseAmount(noCpfRecord.bonus);
             const claimsReimbursement = parseAmount(noCpfRecord.claimsReimbursement);
             const deductions = parseAmount(noCpfRecord.loanRepaymentTotal) + parseAmount(noCpfRecord.noPayDay);

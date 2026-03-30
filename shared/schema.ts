@@ -45,6 +45,8 @@ export const users = appSchema.table("users", {
   defaultMealAllowance: numeric("default_meal_allowance", { precision: 10, scale: 2 }).default("0"),
   defaultShiftAllowance: numeric("default_shift_allowance", { precision: 10, scale: 2 }).default("0"),
   defaultOtherAllowance: numeric("default_other_allowance", { precision: 10, scale: 2 }).default("0"),
+  defaultOtherAllowance1: numeric("default_other_allowance_1", { precision: 10, scale: 2 }).default("0"),
+  defaultOtherAllowance2: numeric("default_other_allowance_2", { precision: 10, scale: 2 }).default("0"),
   defaultHouseRentalAllowance: numeric("default_house_rental_allowance", { precision: 10, scale: 2 }).default("0"),
   // Salary adjustment (dollars) - recurring adjustment added to basic salary
   salaryAdjustment: numeric("salary_adjustment", { precision: 10, scale: 2 }).default("0"),
@@ -524,6 +526,8 @@ export const payrollRecords = appSchema.table("payroll_records", {
   
   // Allowances without CPF
   otherAllowance: numeric("other_allowance", { precision: 12, scale: 2 }).notNull().default("0"),
+  otherAllowance1: numeric("other_allowance_1", { precision: 12, scale: 2 }).notNull().default("0"),
+  otherAllowance2: numeric("other_allowance_2", { precision: 12, scale: 2 }).notNull().default("0"),
   houseRentalAllowances: numeric("house_rental_allowances", { precision: 12, scale: 2 }).notNull().default("0"),
   
   // Deductions - Loan Repayments (combined into single field as JSON or total)

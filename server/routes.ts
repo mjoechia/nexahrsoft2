@@ -1605,6 +1605,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         defaultMealAllowance: z.number().nullable().optional(),
         defaultShiftAllowance: z.number().nullable().optional(),
         defaultOtherAllowance: z.number().nullable().optional(),
+        defaultOtherAllowance1: z.number().nullable().optional(),
+        defaultOtherAllowance2: z.number().nullable().optional(),
         defaultHouseRentalAllowance: z.number().nullable().optional(),
         // Salary adjustment
         salaryAdjustment: z.number().nullable().optional(),
@@ -1648,6 +1650,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             defaultMealAllowance: { from: 'defaultMealAllowance', to: 'mealAllowance' },
             defaultShiftAllowance: { from: 'defaultShiftAllowance', to: 'shiftAllowance' },
             defaultOtherAllowance: { from: 'defaultOtherAllowance', to: 'otherAllowance' },
+            defaultOtherAllowance1: { from: 'defaultOtherAllowance1', to: 'otherAllowance1' },
+            defaultOtherAllowance2: { from: 'defaultOtherAllowance2', to: 'otherAllowance2' },
             defaultHouseRentalAllowance: { from: 'defaultHouseRentalAllowance', to: 'houseRentalAllowances' },
           };
 
@@ -1704,6 +1708,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             const annualLeaveEncashment = parseNumeric(mergedRecord.annualLeaveEncashment);
             const serviceCallAllowances = parseNumeric(mergedRecord.serviceCallAllowances);
             const otherAllowance = parseNumeric(mergedRecord.otherAllowance);
+            const otherAllowance1 = parseNumeric((mergedRecord as any).otherAllowance1);
+            const otherAllowance2 = parseNumeric((mergedRecord as any).otherAllowance2);
             const houseRentalAllowances = parseNumeric(mergedRecord.houseRentalAllowances);
             const bonus = parseNumeric(mergedRecord.bonus);
             const employerCpf = parseNumeric(mergedRecord.employerCpf);
@@ -1720,7 +1726,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             const totSalary = roundToDollars(basicSalary + monthlyVariablesComponent);
             const overtimeTotal = roundToDollars(flat + ot10 + ot15 + ot20 + ot30 + shiftAllowance + totRestPhAmount);
             const allowancesWithCpf = roundToDollars(mobileAllowance + transportAllowance + annualLeaveEncashment + serviceCallAllowances);
-            const allowancesWithoutCpf = roundToDollars(otherAllowance + houseRentalAllowances);
+            const allowancesWithoutCpf = roundToDollars(otherAllowance + otherAllowance1 + otherAllowance2 + houseRentalAllowances);
             const grossWages = roundToDollars(totSalary + overtimeTotal + allowancesWithCpf + allowancesWithoutCpf + bonus);
             const cpfWages = roundToDollars(totSalary + overtimeTotal + allowancesWithCpf + bonus);
             const totalCpf = roundToDollars(employerCpf + Math.abs(employeeCpf));
@@ -5079,6 +5085,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           annualLeaveEncashment: z.number(),
           serviceCallAllowances: z.number(),
           otherAllowance: z.number(),
+          otherAllowance1: z.number().default(0),
+          otherAllowance2: z.number().default(0),
           houseRentalAllowances: z.number(),
           loanRepaymentTotal: z.number(),
           loanRepaymentDetails: z.string().nullable().optional(),
@@ -5128,6 +5136,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         annualLeaveEncashment: toNumericString(r.annualLeaveEncashment),
         serviceCallAllowances: toNumericString(r.serviceCallAllowances),
         otherAllowance: toNumericString(r.otherAllowance),
+        otherAllowance1: toNumericString(r.otherAllowance1 ?? 0),
+        otherAllowance2: toNumericString(r.otherAllowance2 ?? 0),
         houseRentalAllowances: toNumericString(r.houseRentalAllowances),
         loanRepaymentTotal: toNumericString(r.loanRepaymentTotal),
         noPayDay: toNumericString(r.noPayDay),
@@ -5471,9 +5481,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const mealAllowance = parseFloat(employee.defaultMealAllowance || '0');
         const shiftAllowance = parseFloat(employee.defaultShiftAllowance || '0');
         const otherAllowance = parseFloat(employee.defaultOtherAllowance || '0');
+        const otherAllowance1 = parseFloat((employee as any).defaultOtherAllowance1 || '0');
+        const otherAllowance2 = parseFloat((employee as any).defaultOtherAllowance2 || '0');
         const houseRentalAllowance = parseFloat(employee.defaultHouseRentalAllowance || '0');
         const loanDeduction = 0; // Loan deductions come from payroll_loan_accounts, not employee settings
-        const totalAllowances = mobileAllowance + transportAllowance + mealAllowance + shiftAllowance + otherAllowance + houseRentalAllowance;
+        const totalAllowances = mobileAllowance + transportAllowance + mealAllowance + shiftAllowance + otherAllowance + otherAllowance1 + otherAllowance2 + houseRentalAllowance;
         
         // Calculate salary adjustments (additions/deductions from employee settings)
         const employeeSalaryAdjustments = salaryAdjustmentsMap.get(employee.id) || [];
@@ -5559,6 +5571,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           mealAllowance,
           shiftAllowance,
           otherAllowance,
+          otherAllowance1,
+          otherAllowance2,
           houseRentalAllowance,
           loanDeduction,
           advance: 0,
@@ -5822,6 +5836,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const annualLeaveEncashment = parseNumeric(record.annualLeaveEncashment);
         const serviceCallAllowances = parseNumeric(record.serviceCallAllowances);
         const otherAllowance = parseNumeric(record.otherAllowance);
+        const otherAllowance1 = parseNumeric((record as any).otherAllowance1);
+        const otherAllowance2 = parseNumeric((record as any).otherAllowance2);
         const houseRentalAllowances = parseNumeric(record.houseRentalAllowances);
         const bonus = parseNumeric(record.bonus);
         let employerCpf = parseNumeric(record.employerCpf);
@@ -5839,10 +5855,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const totSalary = roundToDollars(basicSalary + monthlyVariablesComponent);
         const overtimeTotal = roundToDollars(flat + ot10 + ot15 + ot20 + ot30 + shiftAllowance + totRestPhAmount);
         const allowancesWithCpf = roundToDollars(mobileAllowance + transportAllowance + annualLeaveEncashment + serviceCallAllowances);
-        const allowancesWithoutCpf = roundToDollars(otherAllowance + houseRentalAllowances);
+        const allowancesWithoutCpf = roundToDollars(otherAllowance + otherAllowance1 + otherAllowance2 + houseRentalAllowances);
         const grossWages = roundToDollars(totSalary + overtimeTotal + allowancesWithCpf + allowancesWithoutCpf + bonus);
         const cpfWages = roundToDollars(totSalary + overtimeTotal + allowancesWithCpf + bonus);
-        
+
         // Recalculate CPF contributions if requested
         let cpfRecalculated = false;
         if (shouldRecalculateCpf) {
@@ -6132,9 +6148,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         defaultMealAllowance: { from: 'defaultMealAllowance', to: 'mealAllowance' },
         defaultShiftAllowance: { from: 'defaultShiftAllowance', to: 'shiftAllowance' },
         defaultOtherAllowance: { from: 'defaultOtherAllowance', to: 'otherAllowance' },
+        defaultOtherAllowance1: { from: 'defaultOtherAllowance1', to: 'otherAllowance1' },
+        defaultOtherAllowance2: { from: 'defaultOtherAllowance2', to: 'otherAllowance2' },
         defaultHouseRentalAllowance: { from: 'defaultHouseRentalAllowance', to: 'houseRentalAllowances' },
       };
-      
+
       const updates: Record<string, any> = {};
       const changes: { field: string; oldValue: number; newValue: number }[] = [];
       
@@ -6192,6 +6210,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const annualLeaveEncashment = parseNumeric(mergedRecord.annualLeaveEncashment);
       const serviceCallAllowances = parseNumeric(mergedRecord.serviceCallAllowances);
       const otherAllowance = parseNumeric(mergedRecord.otherAllowance);
+      const otherAllowance1 = parseNumeric((mergedRecord as any).otherAllowance1);
+      const otherAllowance2 = parseNumeric((mergedRecord as any).otherAllowance2);
       const houseRentalAllowances = parseNumeric(mergedRecord.houseRentalAllowances);
       const bonus = parseNumeric(mergedRecord.bonus);
       const employerCpf = parseNumeric(mergedRecord.employerCpf);
@@ -6203,11 +6223,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const sinda = parseNumeric(mergedRecord.sinda);
       const loanRepaymentTotal = parseNumeric(mergedRecord.loanRepaymentTotal);
       const noPayDay = parseNumeric(mergedRecord.noPayDay);
-      
+
       const totSalary = roundToDollars(basicSalary + monthlyVariablesComponent);
       const overtimeTotal = roundToDollars(flat + ot10 + ot15 + ot20 + ot30 + shiftAllowance + totRestPhAmount);
       const allowancesWithCpf = roundToDollars(mobileAllowance + transportAllowance + annualLeaveEncashment + serviceCallAllowances);
-      const allowancesWithoutCpf = roundToDollars(otherAllowance + houseRentalAllowances);
+      const allowancesWithoutCpf = roundToDollars(otherAllowance + otherAllowance1 + otherAllowance2 + houseRentalAllowances);
       const grossWages = roundToDollars(totSalary + overtimeTotal + allowancesWithCpf + allowancesWithoutCpf + bonus);
       const cpfWages = roundToDollars(totSalary + overtimeTotal + allowancesWithCpf + bonus);
       // Note: employeeCpf is stored as negative, use Math.abs for totals (consistent with existing update logic)

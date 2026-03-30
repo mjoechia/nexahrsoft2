@@ -1736,7 +1736,7 @@ export class PgStorage implements IStorage {
       'residencyStatus', 'sprStartDate', 'birthDate',
       'basicMonthlySalary', 'hourlyRate', 'dailyRate', 'payType', 'regularHoursPerDay', 'regularDaysPerWeek',
       'defaultMobileAllowance', 'defaultTransportAllowance', 'defaultMealAllowance',
-      'defaultShiftAllowance', 'defaultOtherAllowance', 'defaultHouseRentalAllowance',
+      'defaultShiftAllowance', 'defaultOtherAllowance', 'defaultOtherAllowance1', 'defaultOtherAllowance2', 'defaultHouseRentalAllowance',
       'salaryAdjustment', 'salaryAdjustmentReason'
     ];
 
