@@ -114,24 +114,31 @@ export default function UserLoginPage() {
       window.location.href = "/dashboard";
     } catch (error: any) {
       console.error('Login error:', error);
-      if (error.message.includes("401")) {
+      if (error.statusCode === 401) {
         toast({
           title: "Login Failed",
-          description: "Invalid credentials",
+          description: "Invalid email or password.",
           variant: "destructive",
         });
-      } else if (error.message.includes("403")) {
-        toast({
-          title: "Account Pending",
-          description: "Your account is awaiting admin approval",
-          variant: "destructive",
-        });
-        // No session is created for unapproved users, so no need to invalidate
-        setLocation("/pending-approval");
+      } else if (error.statusCode === 403) {
+        if (error.message?.includes("deactivated")) {
+          toast({
+            title: "Account Deactivated",
+            description: error.message,
+            variant: "destructive",
+          });
+        } else {
+          toast({
+            title: "Account Pending",
+            description: "Your account is awaiting admin approval.",
+            variant: "destructive",
+          });
+          setLocation("/pending-approval");
+        }
       } else {
         toast({
           title: "Error",
-          description: "Failed to login. Please try again.",
+          description: error.message || "Failed to login. Please try again.",
           variant: "destructive",
         });
       }
