@@ -1000,11 +1000,21 @@ function EditEmployeeDialog({ employeeId, employeeName, employeeCode, open, onOp
                         else if (eth === 'eurasian' && !isForeigner) fund = 'ECF';
                         const optOut = getValue("shgOptOut") === true && fund !== 'MBMF';
                         return fund !== 'None' ? (
-                          <div className="p-3 bg-muted rounded-lg">
+                          <div className="p-3 bg-muted rounded-lg flex items-center justify-between gap-3">
                             <p className="text-sm">
                               Applicable fund: <span className="font-semibold">{fund}</span>
                               {optOut && <span className="text-muted-foreground ml-2">(Opted out)</span>}
                             </p>
+                            {fund !== 'MBMF' && (
+                              <Button
+                                size="sm"
+                                variant={optOut ? "outline" : "secondary"}
+                                onClick={() => updateField("shgOptOut", !getValue("shgOptOut"))}
+                                data-testid="button-shg-optout-inline"
+                              >
+                                {optOut ? "Remove Opt Out" : "Opt Out"}
+                              </Button>
+                            )}
                           </div>
                         ) : (
                           <div className="p-3 bg-muted rounded-lg">

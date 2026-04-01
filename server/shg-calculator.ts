@@ -85,7 +85,10 @@ export function calculateSHG(
     return { fund: null, contribution: 0, fundLabel: 'None' };
   }
 
-  if (shgOptOut && fund !== 'MBMF') {
+  // Foreigners are automatically opted out of non-MBMF SHG (SINDA/CDAC/ECF)
+  // MBMF remains applicable to Muslim foreigners (e.g. EP holders)
+  const isForeigner = residencyStatus !== 'SC' && residencyStatus !== 'SPR';
+  if ((shgOptOut || isForeigner) && fund !== 'MBMF') {
     return { fund, contribution: 0, fundLabel: fund };
   }
 
