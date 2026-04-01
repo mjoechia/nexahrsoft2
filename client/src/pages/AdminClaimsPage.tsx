@@ -232,7 +232,14 @@ export default function AdminClaimsPage() {
               <p className="text-muted-foreground">Review and manage employee expense claims</p>
             </div>
             {pendingCount > 0 && (
-              <Badge variant="destructive" className="text-sm">{pendingCount} Pending</Badge>
+              <Badge
+                variant="destructive"
+                className="text-sm cursor-pointer"
+                onClick={() => setActiveTab("pending")}
+                data-testid="badge-pending-count"
+              >
+                {pendingCount} Pending
+              </Badge>
             )}
           </div>
           <Button variant="outline" onClick={() => setLocation("/admin/dashboard")} data-testid="button-back">
