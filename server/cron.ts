@@ -116,8 +116,7 @@ export async function startCronJobs(): Promise<void> {
   console.log("[Cron] Auto-archive past resignations: scheduled (runs every 24h)");
 
   // --- Monthly: auto-generate previous month payroll ---
-  // Always run on startup — skips gracefully if records already exist.
-  // Self-heals even if the server was down for multiple days (no arbitrary date cutoff).
-  await autoGeneratePreviousMonthPayroll();
+  // Runs on the 1st of each month at 01:00 SGT only.
+  // Not run on startup to avoid conflicting with manual admin deletions/regenerations.
   scheduleNextMonthlyPayrollRun();
 }
