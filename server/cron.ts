@@ -58,7 +58,7 @@ async function autoGeneratePreviousMonthPayroll(): Promise<void> {
       return;
     }
 
-    const result = await generatePayrollForPeriod(year, month, { importedBy: "system-cron" });
+    const result = await generatePayrollForPeriod(year, month, { suppressAllOT: true, importedBy: "system-cron" });
 
     console.log(
       JSON.stringify({

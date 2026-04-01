@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGr
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Calculator, Loader2, Users, DollarSign, Clock, AlertTriangle, CheckCircle2, Play, History, Settings, Download, Printer, Ban, Search } from "lucide-react";
+import { ArrowLeft, Calculator, Loader2, Users, DollarSign, Clock, AlertTriangle, CheckCircle2, Play, History, Settings, Download, Printer, Ban, Search, Trash2 } from "lucide-react";
 import { useLocation } from "wouter";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
@@ -29,6 +29,7 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
+  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 
 const MONTH_NAMES: Record<number, string> = {
@@ -231,6 +232,20 @@ export default function AdminPayrollGeneratePage() {
         description: error.message,
         variant: "destructive",
       });
+    },
+  });
+
+  const deleteRecordsMutation = useMutation({
+    mutationFn: async () => {
+      return apiRequest("DELETE", `/api/admin/payroll/records/${selectedYear}/${selectedMonth}`);
+    },
+    onSuccess: () => {
+      toast({ title: "Records Deleted", description: `Payroll records for ${MONTH_NAMES[selectedMonth]} ${selectedYear} have been deleted.` });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/payroll/records"] });
+      setPreviewData(null);
+    },
+    onError: (error: Error) => {
+      toast({ title: "Delete Failed", description: error.message, variant: "destructive" });
     },
   });
 
@@ -473,8 +488,45 @@ export default function AdminPayrollGeneratePage() {
                 </SelectContent>
               </Select>
             </div>
-            <Button 
-              onClick={handlePreview} 
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button
+                  variant="outline"
+                  className="text-red-600 hover:text-red-700 hover:bg-red-100 dark:hover:bg-red-900/30 border-red-200"
+                  disabled={deleteRecordsMutation.isPending}
+                  data-testid="button-delete-period"
+                >
+                  {deleteRecordsMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  ) : (
+                    <Trash2 className="h-4 w-4 mr-2" />
+                  )}
+                  Delete Records
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle className="flex items-center gap-2">
+                    <AlertTriangle className="h-5 w-5 text-red-600" />
+                    Delete Payroll Records
+                  </AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Are you sure you want to delete all payroll records for {MONTH_NAMES[selectedMonth]} {selectedYear}? This action cannot be undone.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    className="bg-red-600 hover:bg-red-700"
+                    onClick={() => deleteRecordsMutation.mutate()}
+                  >
+                    Delete Records
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+            <Button
+              onClick={handlePreview}
               disabled={previewMutation.isPending}
               data-testid="button-preview"
             >

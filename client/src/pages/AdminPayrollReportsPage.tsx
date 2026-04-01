@@ -809,8 +809,8 @@ export default function AdminPayrollReportsPage() {
               <Download className="h-4 w-4 mr-2" />
               Export CSV
             </Button>
-            <Button 
-              variant="outline" 
+            <Button
+              variant="outline"
               onClick={exportToExcel}
               disabled={records.length === 0}
               data-testid="button-export-excel"
@@ -818,6 +818,47 @@ export default function AdminPayrollReportsPage() {
               <FileSpreadsheet className="h-4 w-4 mr-2" />
               Export Excel
             </Button>
+            {selectedMonth && selectedMonth !== "" && records.length > 0 && (
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className="text-red-600 hover:text-red-700 hover:bg-red-100 dark:hover:bg-red-900/30 border-red-200"
+                    disabled={deleteMutation.isPending}
+                    data-testid="button-delete-period"
+                  >
+                    {deleteMutation.isPending ? (
+                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    ) : (
+                      <Trash2 className="h-4 w-4 mr-2" />
+                    )}
+                    Delete Records
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle className="flex items-center gap-2">
+                      <AlertTriangle className="h-5 w-5 text-red-600" />
+                      Delete Payroll Records
+                    </AlertDialogTitle>
+                    <AlertDialogDescription>
+                      Are you sure you want to delete all {records.length} payroll records for the selected period? This action cannot be undone.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                      className="bg-red-600 hover:bg-red-700"
+                      onClick={() => deleteMutation.mutate({ year: selectedYear, month: parseInt(selectedMonth) })}
+                      data-testid="button-confirm-delete-period"
+                    >
+                      {deleteMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                      Delete Records
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            )}
           </div>
         </CardContent>
       </Card>
