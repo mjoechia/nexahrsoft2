@@ -5317,6 +5317,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         mealAllowance: number;
         shiftAllowance: number;
         otherAllowance: number;
+        otherAllowance1: number;
+        otherAllowance2: number;
         houseRentalAllowance: number;
         loanDeduction: number;
         advance?: number;
@@ -7807,7 +7809,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { status, reviewComments } = req.body;
       const adminUserId = req.session.userId;
       
-      if (!status || !['approved', 'rejected', 'pending'].includes(status)) {
+      if (!status || !['approved', 'rejected', 'pending', 'processed'].includes(status)) {
         return res.status(400).json({ message: "Invalid status" });
       }
       
