@@ -1642,8 +1642,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       try {
         const allRecords = await storage.getPayrollRecordsByUserId(id);
-        
+
         if (allRecords && allRecords.length > 0) {
+          const { calculateSHG } = await import("./shg-calculator");
+          const shgRelevantChanged = 'shgOptOut' in updates || 'ethnicity' in updates || 'religion' in updates || 'residencyStatus' in updates;
+
           const allowanceMapping: Record<string, { from: string; to: string }> = {
             defaultMobileAllowance: { from: 'defaultMobileAllowance', to: 'mobileAllowance' },
             defaultTransportAllowance: { from: 'defaultTransportAllowance', to: 'transportAllowance' },
@@ -1686,10 +1689,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
               });
             }
             
+            // Recalculate SHG when opt-out / ethnicity / religion / residency changes
+            if (shgRelevantChanged) {
+              const grossWagesForSHG = parseNumeric(existingRecord.grossWages);
+              const shgResult = calculateSHG(
+                user.ethnicity,
+                user.religion,
+                user.residencyStatus,
+                grossWagesForSHG,
+                user.shgOptOut || false,
+              );
+              const newSinda = shgResult.fund === 'SINDA' ? shgResult.contribution : 0;
+              const newCdac  = shgResult.fund === 'CDAC'  ? shgResult.contribution : 0;
+              const newMbmf  = shgResult.fund === 'MBMF'  ? shgResult.contribution : 0;
+              const newEcf   = shgResult.fund === 'ECF'   ? shgResult.contribution : 0;
+              const oldSinda = parseNumeric(existingRecord.sinda);
+              const oldCdac  = parseNumeric(existingRecord.cdac);
+              const oldMbmf  = parseNumeric(existingRecord.mbmf);
+              const oldEcf   = parseNumeric(existingRecord.ecf);
+              if (newSinda !== oldSinda) { payslipUpdates.sinda = newSinda; changes.push({ field: 'sinda', oldValue: oldSinda, newValue: newSinda }); }
+              if (newCdac  !== oldCdac)  { payslipUpdates.cdac  = newCdac;  changes.push({ field: 'cdac',  oldValue: oldCdac,  newValue: newCdac  }); }
+              if (newMbmf  !== oldMbmf)  { payslipUpdates.mbmf  = newMbmf;  changes.push({ field: 'mbmf',  oldValue: oldMbmf,  newValue: newMbmf  }); }
+              if (newEcf   !== oldEcf)   { payslipUpdates.ecf   = newEcf;   changes.push({ field: 'ecf',   oldValue: oldEcf,   newValue: newEcf   }); }
+            }
+
             if (Object.keys(payslipUpdates).length === 0) {
               continue;
             }
-            
+
             // Recalculate totals
             const mergedRecord = { ...existingRecord, ...payslipUpdates };
             
