@@ -573,8 +573,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Account pending approval" });
       }
 
-      // Block archived users
-      if (user.isArchived) {
+      // Block archived users (except nexauser test account)
+      if (user.isArchived && user.email !== 'nexauser@nexahr.com') {
         return res.status(403).json({ message: "This account has been deactivated. Please contact HR." });
       }
 

@@ -127,6 +127,12 @@ export default function UserLoginPage() {
             description: error.message,
             variant: "destructive",
           });
+        } else if (error.message?.toLowerCase().includes("admin login")) {
+          toast({
+            title: "Wrong Login Page",
+            description: "Please use the Admin Login page to sign in.",
+            variant: "destructive",
+          });
         } else {
           toast({
             title: "Account Pending",
