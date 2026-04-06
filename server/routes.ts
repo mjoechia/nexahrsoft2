@@ -574,7 +574,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Block archived users (except nexauser test account)
-      if (user.isArchived && user.email !== 'nexauser@nexahr.com') {
+      const isTestAccount = user.email === 'nexauser@nexahr.com' || user.username === 'nexauser';
+      if (user.isArchived && !isTestAccount) {
         return res.status(403).json({ message: "This account has been deactivated. Please contact HR." });
       }
 
