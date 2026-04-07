@@ -104,6 +104,7 @@ export default function AdminClaimsPage() {
   const [claimToDelete, setClaimToDelete] = useState<Claim | null>(null);
   const [deleteReason, setDeleteReason] = useState("");
   const [activeTab, setActiveTab] = useState("pending");
+  const [pendingSearch, setPendingSearch] = useState("");
   const { toast } = useToast();
 
   const [selectedMonth, selectedYear] = selectedPeriod.split("-").map(Number);
@@ -190,7 +191,13 @@ export default function AdminClaimsPage() {
   };
 
   const claims = claimsData?.claims || [];
-  const pendingClaims  = claims.filter(c => c.status === "pending").sort((a, b) => (a.employeeName || "").localeCompare(b.employeeName || ""));
+  const pendingClaimsAll = claims.filter(c => c.status === "pending").sort((a, b) => (a.employeeName || "").localeCompare(b.employeeName || ""));
+  const pendingClaims = pendingSearch.trim()
+    ? pendingClaimsAll.filter(c =>
+        (c.employeeName || "").toLowerCase().includes(pendingSearch.toLowerCase()) ||
+        (c.employeeCode || "").toLowerCase().includes(pendingSearch.toLowerCase())
+      )
+    : pendingClaimsAll;
   const approvedClaims = claims.filter(c => c.status === "approved").sort((a, b) => (a.employeeName || "").localeCompare(b.employeeName || ""));
   const processedClaims = claims.filter(c => c.status === "processed").sort((a, b) => (a.employeeName || "").localeCompare(b.employeeName || ""));
   const rejectedClaims = claims.filter(c => c.status === "rejected").sort((a, b) => (a.employeeName || "").localeCompare(b.employeeName || ""));
@@ -281,7 +288,16 @@ export default function AdminClaimsPage() {
                     <Filter className="h-5 w-5" />
                     Pending Claims
                   </CardTitle>
-                  <PeriodSelector />
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Input
+                      placeholder="Search by name or code..."
+                      value={pendingSearch}
+                      onChange={e => setPendingSearch(e.target.value)}
+                      className="w-52"
+                      data-testid="input-pending-search"
+                    />
+                    <PeriodSelector />
+                  </div>
                 </div>
               </CardHeader>
               <CardContent>
