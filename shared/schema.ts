@@ -929,13 +929,14 @@ export type InsertManualPayslipAuditLog = z.infer<typeof insertManualPayslipAudi
 export type ManualPayslipAuditLog = typeof manualPayslipAuditLogs.$inferSelect;
 
 // Claims System
-export const claimTypes = ["transport", "material_purchase", "other"] as const;
+export const claimTypes = ["transport", "material_purchase", "other", "overtime"] as const;
 export type ClaimType = typeof claimTypes[number];
 
 export const claimTypeLabels: Record<ClaimType, string> = {
   transport: "Transport",
   material_purchase: "Material Purchase",
   other: "Other",
+  overtime: "Overtime",
 };
 
 export const claims = appSchema.table("claims", {
@@ -943,18 +944,24 @@ export const claims = appSchema.table("claims", {
   userId: varchar("user_id").notNull(), // Employee who submitted the claim
   employeeCode: text("employee_code"), // Denormalized for quick reference
   employeeName: text("employee_name"), // Denormalized for quick reference
-  claimType: text("claim_type").notNull(), // 'transport', 'material_purchase', 'other'
+  claimType: text("claim_type").notNull(), // 'transport', 'material_purchase', 'other', 'overtime'
   amount: numeric("amount", { precision: 10, scale: 2 }).notNull(),
   description: text("description"), // Optional description of the claim
   receiptUrl: text("receipt_url"), // URL to uploaded receipt file
   receiptFileName: text("receipt_file_name"), // Original file name
-  status: text("status").notNull().default("pending"), // 'pending', 'approved', 'rejected'
+  status: text("status").notNull().default("pending"), // 'pending', 'approved', 'rejected', 'processed'
   reviewedBy: varchar("reviewed_by"), // Admin who reviewed (no FK for flexibility)
   reviewedAt: timestamp("reviewed_at"),
   reviewComments: text("review_comments"),
   submittedAt: timestamp("submitted_at").notNull().defaultNow(),
   claimMonth: integer("claim_month").notNull(), // Month the claim is for (1-12)
   claimYear: integer("claim_year").notNull(), // Year the claim is for
+  // OT-specific fields
+  workDate: text("work_date"), // Date of OT work (YYYY-MM-DD)
+  hours1_5: numeric("hours_1_5", { precision: 4, scale: 2 }), // 1.5x OT hours
+  hours2: numeric("hours_2", { precision: 4, scale: 2 }), // 2x OT hours
+  calculatedAmount: numeric("calculated_amount", { precision: 10, scale: 2 }), // Server-computed OT pay (never sent to employee)
+  otFiles: text("ot_files"), // JSON array of {url, name} for multiple proof files
 });
 
 export const insertClaimSchema = createInsertSchema(claims).omit({

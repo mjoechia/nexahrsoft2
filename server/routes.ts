@@ -7691,15 +7691,112 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ==================== CLAIMS ROUTES ====================
   
   // Employee: Submit a new claim
-  app.post("/api/claims", upload.single('receipt'), async (req: Request, res: Response) => {
+  app.post("/api/claims", upload.fields([
+    { name: 'receipt', maxCount: 1 },
+    { name: 'files', maxCount: 5 },
+  ]), async (req: Request, res: Response) => {
     if (!req.session?.userId || req.session.isAdmin) {
       return res.status(401).json({ message: "User authentication required" });
     }
-    
+
     try {
       const userId = req.session.userId;
-      
-      // Zod validation for claims
+      const uploadedFiles = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
+
+      // ── OT claim path ──────────────────────────────────────────────────
+      if (req.body.claimType === 'overtime') {
+        const otSchema = z.object({
+          claimType: z.literal('overtime'),
+          workDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "workDate must be YYYY-MM-DD"),
+          hours1_5: z.string().optional().default('0').transform(v => parseFloat(v) || 0),
+          hours2:   z.string().optional().default('0').transform(v => parseFloat(v) || 0),
+          notes:    z.string().optional(),
+          claimMonth: z.string().transform(v => parseInt(v)),
+          claimYear:  z.string().transform(v => parseInt(v)),
+        });
+
+        const validation = otSchema.safeParse(req.body);
+        if (!validation.success) {
+          return res.status(400).json({ message: validation.error.errors[0].message });
+        }
+
+        const { workDate, hours1_5, hours2, notes, claimMonth, claimYear } = validation.data;
+
+        // Validate hours
+        if (hours1_5 < 0 || hours2 < 0) {
+          return res.status(400).json({ message: "Please enter valid overtime hours." });
+        }
+        if (hours1_5 === 0 && hours2 === 0) {
+          return res.status(400).json({ message: "Please enter overtime hours." });
+        }
+        if (hours1_5 + hours2 > 16) {
+          return res.status(400).json({ message: "Total overtime cannot exceed 16 hours per day." });
+        }
+
+        // Duplicate OT check for same work date
+        const { claims: claimsTable } = await import("../shared/schema");
+        const existing = await db.select({ id: claimsTable.id })
+          .from(claimsTable)
+          .where(and(
+            eq(claimsTable.userId, userId),
+            eq(claimsTable.claimType, 'overtime'),
+            eq(claimsTable.workDate, workDate),
+          ))
+          .limit(1);
+        if (existing.length > 0) {
+          return res.status(400).json({ message: "OT claim already submitted for this date." });
+        }
+
+        // Fetch hourly rate — never expose to client
+        const employee = await storage.getUser(userId);
+        const hourlyRate = parseFloat(String(employee?.hourlyRate || '0'));
+        if (hourlyRate <= 0) {
+          return res.status(400).json({ message: "Hourly rate not configured. Please contact HR." });
+        }
+
+        // Server-side OT calculation
+        const ot1_5Pay = hourlyRate * 1.5 * hours1_5;
+        const ot2Pay   = hourlyRate * 2   * hours2;
+        const totalOT  = parseFloat((ot1_5Pay + ot2Pay).toFixed(2));
+
+        // Upload proof files
+        const objectStorageService = new ObjectStorageService();
+        const otFileRecords: { url: string; name: string }[] = [];
+        if (uploadedFiles?.files) {
+          for (const f of uploadedFiles.files) {
+            const url = await objectStorageService.uploadPrivateFile(
+              f.buffer, f.originalname, f.mimetype, `claims-ot/${userId}`
+            );
+            otFileRecords.push({ url, name: f.originalname });
+          }
+        }
+
+        const claim = await storage.createClaim({
+          userId,
+          employeeCode: employee?.employeeCode || null,
+          employeeName: employee?.name || 'Unknown',
+          claimType: 'overtime',
+          amount: String(totalOT),
+          description: notes || null,
+          receiptUrl: null,
+          receiptFileName: null,
+          claimMonth,
+          claimYear,
+          status: 'pending',
+          workDate,
+          hours1_5: String(hours1_5),
+          hours2: String(hours2),
+          calculatedAmount: String(totalOT),
+          otFiles: otFileRecords.length > 0 ? JSON.stringify(otFileRecords) : null,
+        });
+
+        // Return claim without exposing rate/calculation breakdown
+        const { calculatedAmount: _ca, ...safeClaimForUser } = claim as any;
+        res.json({ success: true, claim: safeClaimForUser });
+        return;
+      }
+
+      // ── Non-OT claim path ──────────────────────────────────────────────
       const claimSchema = z.object({
         claimType: z.enum(["transport", "material_purchase", "other"]),
         amount: z.string().refine(val => !isNaN(parseFloat(val)) && parseFloat(val) > 0, {
@@ -7715,35 +7812,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return num >= 2020 && num <= 2100;
         }, { message: "Invalid year" }),
       });
-      
+
       const validation = claimSchema.safeParse(req.body);
       if (!validation.success) {
-        return res.status(400).json({ 
-          message: "Validation failed", 
-          errors: validation.error.errors 
+        return res.status(400).json({
+          message: "Validation failed",
+          errors: validation.error.errors
         });
       }
-      
+
       const { claimType, amount, description, claimMonth, claimYear } = validation.data;
-      
+
       // Upload receipt to object storage if provided
       let receiptUrl: string | null = null;
       let receiptFileName: string | null = null;
-      
-      if (req.file) {
+
+      const singleReceipt = uploadedFiles?.receipt?.[0];
+      if (singleReceipt) {
         const objectStorageService = new ObjectStorageService();
         receiptUrl = await objectStorageService.uploadPrivateFile(
-          req.file.buffer,
-          req.file.originalname,
-          req.file.mimetype,
+          singleReceipt.buffer,
+          singleReceipt.originalname,
+          singleReceipt.mimetype,
           `claims/${userId}`
         );
-        receiptFileName = req.file.originalname;
+        receiptFileName = singleReceipt.originalname;
       }
-      
+
       // Get employee details
       const employee = await storage.getUser(userId);
-      
+
       const claim = await storage.createClaim({
         userId: userId,
         employeeCode: employee?.employeeCode || null,
@@ -7757,7 +7855,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         claimYear: parseInt(claimYear),
         status: 'pending',
       });
-      
+
       res.json({ success: true, claim });
     } catch (error) {
       console.error("Submit claim error:", error);
@@ -7765,14 +7863,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  // Employee: Get my claims
+  // Employee: Get my claims (calculatedAmount stripped — never exposed to employee)
   app.get("/api/claims", async (req: Request, res: Response) => {
     if (!req.session?.userId || req.session.isAdmin) {
       return res.status(401).json({ message: "User authentication required" });
     }
-    
+
     try {
-      const claims = await storage.getClaimsByUser(req.session.userId);
+      const rawClaims = await storage.getClaimsByUser(req.session.userId);
+      const claims = rawClaims.map(({ calculatedAmount: _ca, ...c }) => c);
       res.json({ claims });
     } catch (error) {
       console.error("Get claims error:", error);

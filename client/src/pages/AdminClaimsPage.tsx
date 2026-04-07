@@ -528,7 +528,13 @@ export default function AdminClaimsPage() {
             <DialogHeader>
               <DialogTitle>Claim Details</DialogTitle>
             </DialogHeader>
-            {selectedClaim && (
+            {selectedClaim && (() => {
+              const isOT = selectedClaim.claimType === "overtime";
+              const otFiles: { url: string; name: string }[] = (() => {
+                try { return selectedClaim.otFiles ? JSON.parse(selectedClaim.otFiles) : []; }
+                catch { return []; }
+              })();
+              return (
               <div className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div>
@@ -544,10 +550,6 @@ export default function AdminClaimsPage() {
                     <p className="font-medium">{claimTypeLabels[selectedClaim.claimType as keyof typeof claimTypeLabels] || selectedClaim.claimType}</p>
                   </div>
                   <div>
-                    <Label className="text-muted-foreground text-xs">Amount</Label>
-                    <p className="font-medium text-lg">${parseFloat(selectedClaim.amount).toFixed(2)}</p>
-                  </div>
-                  <div>
                     <Label className="text-muted-foreground text-xs">Period</Label>
                     <p className="font-medium">{MONTH_NAMES[selectedClaim.claimMonth - 1]} {selectedClaim.claimYear}</p>
                   </div>
@@ -555,16 +557,68 @@ export default function AdminClaimsPage() {
                     <Label className="text-muted-foreground text-xs">Submitted</Label>
                     <p className="font-medium">{format(new Date(selectedClaim.submittedAt), "dd MMM yyyy HH:mm")}</p>
                   </div>
+                  {!isOT && (
+                    <div>
+                      <Label className="text-muted-foreground text-xs">Amount</Label>
+                      <p className="font-medium text-lg">${parseFloat(selectedClaim.amount).toFixed(2)}</p>
+                    </div>
+                  )}
                 </div>
+
+                {/* OT breakdown — admin only */}
+                {isOT && (
+                  <div className="bg-muted/50 rounded-lg p-4 space-y-3">
+                    <p className="text-sm font-semibold">OT Breakdown</p>
+                    {selectedClaim.workDate && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-muted-foreground">Work Date</span>
+                        <span className="font-medium">{selectedClaim.workDate}</span>
+                      </div>
+                    )}
+                    {selectedClaim.hours1_5 && parseFloat(String(selectedClaim.hours1_5)) > 0 && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-muted-foreground">1.5× Hours</span>
+                        <span className="font-medium">{selectedClaim.hours1_5}h</span>
+                      </div>
+                    )}
+                    {selectedClaim.hours2 && parseFloat(String(selectedClaim.hours2)) > 0 && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-muted-foreground">2× Hours</span>
+                        <span className="font-medium">{selectedClaim.hours2}h</span>
+                      </div>
+                    )}
+                    <div className="border-t pt-2 flex justify-between text-sm font-semibold">
+                      <span>Calculated OT Pay</span>
+                      <span className="text-lg">${parseFloat(selectedClaim.calculatedAmount || selectedClaim.amount).toFixed(2)}</span>
+                    </div>
+                  </div>
+                )}
 
                 {selectedClaim.description && (
                   <div>
-                    <Label className="text-muted-foreground text-xs">Description</Label>
+                    <Label className="text-muted-foreground text-xs">{isOT ? "Notes" : "Description"}</Label>
                     <p className="text-sm bg-muted p-3 rounded-md">{selectedClaim.description}</p>
                   </div>
                 )}
 
-                {selectedClaim.receiptFileName && (
+                {/* OT proof files */}
+                {isOT && otFiles.length > 0 && (
+                  <div className="space-y-2">
+                    <Label className="text-muted-foreground text-xs">Supporting Documents</Label>
+                    {otFiles.map((f, idx) => (
+                      <Button key={idx} variant="outline" className="w-full mt-1 justify-start" asChild>
+                        <a href={f.url} target="_blank" rel="noreferrer">
+                          <FileText className="h-4 w-4 mr-2" />
+                          {f.name}
+                          <ExternalLink className="h-4 w-4 ml-auto" />
+                        </a>
+                      </Button>
+                    ))}
+                  </div>
+                )}
+
+                {/* Non-OT receipt */}
+                {!isOT && selectedClaim.receiptFileName && (
                   <div>
                     <Label className="text-muted-foreground text-xs">Receipt</Label>
                     <Button variant="outline" className="w-full mt-1" onClick={() => handleViewReceipt(selectedClaim.id)} data-testid="button-view-receipt">
@@ -631,7 +685,8 @@ export default function AdminClaimsPage() {
                   </Button>
                 </div>
               </div>
-            )}
+              );
+            })()}
           </DialogContent>
         </Dialog>
 
@@ -673,6 +728,7 @@ interface ClaimRowProps {
 }
 
 function ClaimRow({ claim, onView, onViewReceipt, actions }: ClaimRowProps) {
+  const isOT = claim.claimType === "overtime";
   return (
     <div className="flex items-center justify-between p-4 border rounded-lg hover-elevate gap-4" data-testid={`claim-row-${claim.id}`}>
       <div className="space-y-1 flex-1 min-w-0">
@@ -682,8 +738,17 @@ function ClaimRow({ claim, onView, onViewReceipt, actions }: ClaimRowProps) {
         </div>
         <div className="flex items-center gap-2 text-sm flex-wrap">
           <Badge variant="outline">{claimTypeLabels[claim.claimType as keyof typeof claimTypeLabels] || claim.claimType}</Badge>
-          {claim.description && <span className="text-muted-foreground truncate max-w-xs">{claim.description}</span>}
+          {isOT && claim.workDate
+            ? <span className="text-muted-foreground">Work date: {claim.workDate}</span>
+            : claim.description && <span className="text-muted-foreground truncate max-w-xs">{claim.description}</span>}
         </div>
+        {isOT && (
+          <p className="text-xs text-muted-foreground">
+            {claim.hours1_5 && parseFloat(String(claim.hours1_5)) > 0 && `1.5× ${claim.hours1_5}h`}
+            {claim.hours1_5 && parseFloat(String(claim.hours1_5)) > 0 && claim.hours2 && parseFloat(String(claim.hours2)) > 0 && " · "}
+            {claim.hours2 && parseFloat(String(claim.hours2)) > 0 && `2× ${claim.hours2}h`}
+          </p>
+        )}
         <p className="text-xs text-muted-foreground">Submitted: {format(new Date(claim.submittedAt), "dd MMM yyyy")}</p>
       </div>
       <div className="flex items-center gap-2 shrink-0">
