@@ -589,7 +589,10 @@ export default function AdminClaimsPage() {
                     )}
                     <div className="border-t pt-2 flex justify-between text-sm font-semibold">
                       <span>Calculated OT Pay</span>
-                      <span className="text-lg">${parseFloat(selectedClaim.calculatedAmount || selectedClaim.amount).toFixed(2)}</span>
+                      {selectedClaim.calculatedAmount
+                        ? <span className="text-lg">${parseFloat(selectedClaim.calculatedAmount).toFixed(2)}</span>
+                        : <span className="text-destructive text-sm">⚠️ Set hourly rate to calculate</span>
+                      }
                     </div>
                   </div>
                 )}

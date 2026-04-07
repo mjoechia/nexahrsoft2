@@ -7750,13 +7750,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Fetch hourly rate — never expose to client
         const employee = await storage.getUser(userId);
         const hourlyRate = parseFloat(String(employee?.hourlyRate || '0'));
-        if (hourlyRate <= 0) {
-          return res.status(400).json({ message: "Hourly rate not configured. Please contact HR." });
-        }
 
-        // Server-side OT calculation
-        const ot1_5Pay = hourlyRate * 1.5 * hours1_5;
-        const ot2Pay   = hourlyRate * 2   * hours2;
+        // If hourly rate not set, submit with amount=0 and flag for admin
+        const hourlyRateMissing = hourlyRate <= 0;
+        const ot1_5Pay = hourlyRateMissing ? 0 : hourlyRate * 1.5 * hours1_5;
+        const ot2Pay   = hourlyRateMissing ? 0 : hourlyRate * 2   * hours2;
         const totalOT  = parseFloat((ot1_5Pay + ot2Pay).toFixed(2));
 
         // Upload proof files
@@ -7771,13 +7769,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
         }
 
+        const descriptionParts = [];
+        if (hourlyRateMissing) descriptionParts.push('⚠️ Hourly rate not set — please configure this employee\'s hourly rate and recalculate.');
+        if (notes) descriptionParts.push(notes);
+
         const claim = await storage.createClaim({
           userId,
           employeeCode: employee?.employeeCode || null,
           employeeName: employee?.name || 'Unknown',
           claimType: 'overtime',
           amount: String(totalOT),
-          description: notes || null,
+          description: descriptionParts.join(' ') || null,
           receiptUrl: null,
           receiptFileName: null,
           claimMonth,
@@ -7786,7 +7788,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           workDate,
           hours1_5: String(hours1_5),
           hours2: String(hours2),
-          calculatedAmount: String(totalOT),
+          calculatedAmount: hourlyRateMissing ? null : String(totalOT),
           otFiles: otFileRecords.length > 0 ? JSON.stringify(otFileRecords) : null,
         });
 

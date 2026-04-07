@@ -277,7 +277,7 @@ export default function ClaimsPage() {
                         <Input
                           type="number"
                           id="hours1_5"
-                          step="0.25"
+                          step="0.5"
                           min="0"
                           max="16"
                           value={hours1_5}
@@ -291,7 +291,7 @@ export default function ClaimsPage() {
                         <Input
                           type="number"
                           id="hours2"
-                          step="0.25"
+                          step="0.5"
                           min="0"
                           max="16"
                           value={hours2}
