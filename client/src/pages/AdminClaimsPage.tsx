@@ -32,7 +32,7 @@ import {
 } from "@/components/ui/select";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import type { Claim } from "@shared/schema";
+import type { Claim, TimesheetRow } from "@shared/schema";
 import { claimTypeLabels } from "@shared/schema";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
@@ -540,14 +540,19 @@ export default function AdminClaimsPage() {
 
         {/* ── CLAIM DETAIL DIALOG ── */}
         <Dialog open={!!selectedClaim} onOpenChange={() => { setSelectedClaim(null); setReviewComments(""); }}>
-          <DialogContent className="sm:max-w-lg">
+          <DialogContent className={selectedClaim?.claimType === "ot_timesheet" ? "sm:max-w-4xl max-h-[90vh] overflow-y-auto" : "sm:max-w-lg"}>
             <DialogHeader>
               <DialogTitle>Claim Details</DialogTitle>
             </DialogHeader>
             {selectedClaim && (() => {
-              const isOT = selectedClaim.claimType === "overtime";
+              const isOT = selectedClaim.claimType === "overtime" || selectedClaim.claimType === "ot_timesheet";
+              const isOTSheet = selectedClaim.claimType === "ot_timesheet";
               const otFiles: { url: string; name: string }[] = (() => {
                 try { return selectedClaim.otFiles ? JSON.parse(selectedClaim.otFiles) : []; }
+                catch { return []; }
+              })();
+              const timesheetRows: TimesheetRow[] = (() => {
+                try { return (selectedClaim as any).timesheetRows ? JSON.parse((selectedClaim as any).timesheetRows) : []; }
                 catch { return []; }
               })();
               return (
@@ -581,8 +586,66 @@ export default function AdminClaimsPage() {
                   )}
                 </div>
 
-                {/* OT breakdown — admin only */}
-                {isOT && (
+                {/* OT Timesheet table — admin only */}
+                {isOTSheet && timesheetRows.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-sm font-semibold">Timesheet — {MONTH_NAMES[(selectedClaim.claimMonth ?? 1) - 1]} {selectedClaim.claimYear}</p>
+                    <div className="overflow-auto max-h-72 border rounded-md">
+                      <table className="w-full text-xs border-collapse">
+                        <thead className="bg-muted sticky top-0">
+                          <tr>
+                            <th className="px-2 py-1 text-left font-medium border-b">Date</th>
+                            <th className="px-2 py-1 text-left font-medium border-b">Day</th>
+                            <th className="px-2 py-1 text-left font-medium border-b">Customer</th>
+                            <th className="px-2 py-1 text-left font-medium border-b">Proj #</th>
+                            <th className="px-2 py-1 text-left font-medium border-b">Time-In</th>
+                            <th className="px-2 py-1 text-left font-medium border-b">Time-Out</th>
+                            <th className="px-2 py-1 text-center font-medium border-b">1.5×h</th>
+                            <th className="px-2 py-1 text-center font-medium border-b">2×h</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {timesheetRows.map((row, i) => {
+                            const isWeekend = row.dayName === "SAT" || row.dayName === "SUN";
+                            return (
+                              <tr key={i} className={isWeekend ? "bg-muted/40" : ""}>
+                                <td className="px-2 py-1 border-b whitespace-nowrap">{row.date}</td>
+                                <td className="px-2 py-1 border-b font-medium">{row.dayName}</td>
+                                <td className="px-2 py-1 border-b">{row.customerName}</td>
+                                <td className="px-2 py-1 border-b">{row.projectNumber}</td>
+                                <td className="px-2 py-1 border-b">{row.timeIn}</td>
+                                <td className="px-2 py-1 border-b">{row.timeOut}</td>
+                                <td className="px-2 py-1 border-b text-center">{row.hours1_5 > 0 ? row.hours1_5 : ""}</td>
+                                <td className="px-2 py-1 border-b text-center">{row.hours2 > 0 ? row.hours2 : ""}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                        <tfoot className="bg-muted sticky bottom-0">
+                          <tr>
+                            <td colSpan={6} className="px-2 py-1 text-right font-semibold border-t">TOTAL</td>
+                            <td className="px-2 py-1 text-center font-semibold border-t">
+                              {(selectedClaim as any).totalHours1_5 ? parseFloat(String((selectedClaim as any).totalHours1_5)) : ""}
+                            </td>
+                            <td className="px-2 py-1 text-center font-semibold border-t">
+                              {(selectedClaim as any).totalHours2 ? parseFloat(String((selectedClaim as any).totalHours2)) : ""}
+                            </td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                    <div className="bg-muted/50 rounded-lg p-3 flex justify-between text-sm font-semibold">
+                      <span>Calculated OT Pay</span>
+                      {selectedClaim.calculatedAmount
+                        ? <span className="text-lg">${parseFloat(selectedClaim.calculatedAmount).toFixed(2)}</span>
+                        : <span className="text-destructive text-sm">⚠️ Set hourly rate to calculate</span>
+                      }
+                    </div>
+                  </div>
+                )}
+
+                {/* Single-day OT breakdown — admin only */}
+                {isOT && !isOTSheet && (
                   <div className="bg-muted/50 rounded-lg p-4 space-y-3">
                     <p className="text-sm font-semibold">OT Breakdown</p>
                     {selectedClaim.workDate && (
@@ -748,6 +811,7 @@ interface ClaimRowProps {
 
 function ClaimRow({ claim, onView, onViewReceipt, actions }: ClaimRowProps) {
   const isOT = claim.claimType === "overtime";
+  const isOTSheet = claim.claimType === "ot_timesheet";
   return (
     <div className="flex items-center justify-between p-4 border rounded-lg hover-elevate gap-4" data-testid={`claim-row-${claim.id}`}>
       <div className="space-y-1 flex-1 min-w-0">
@@ -757,11 +821,20 @@ function ClaimRow({ claim, onView, onViewReceipt, actions }: ClaimRowProps) {
         </div>
         <div className="flex items-center gap-2 text-sm flex-wrap">
           <Badge variant="outline">{claimTypeLabels[claim.claimType as keyof typeof claimTypeLabels] || claim.claimType}</Badge>
-          {isOT && claim.workDate
-            ? <span className="text-muted-foreground">Work date: {claim.workDate}</span>
-            : claim.description && <span className="text-muted-foreground truncate max-w-xs">{claim.description}</span>}
+          {isOTSheet
+            ? <span className="text-muted-foreground">{MONTH_NAMES[(claim.claimMonth ?? 1) - 1]} {claim.claimYear}</span>
+            : isOT && claim.workDate
+              ? <span className="text-muted-foreground">Work date: {claim.workDate}</span>
+              : claim.description && <span className="text-muted-foreground truncate max-w-xs">{claim.description}</span>}
         </div>
-        {isOT && (
+        {isOTSheet && (
+          <p className="text-xs text-muted-foreground">
+            {(claim as any).totalHours1_5 && parseFloat(String((claim as any).totalHours1_5)) > 0 && `1.5× ${(claim as any).totalHours1_5}h`}
+            {(claim as any).totalHours1_5 && parseFloat(String((claim as any).totalHours1_5)) > 0 && (claim as any).totalHours2 && parseFloat(String((claim as any).totalHours2)) > 0 && " · "}
+            {(claim as any).totalHours2 && parseFloat(String((claim as any).totalHours2)) > 0 && `2× ${(claim as any).totalHours2}h`}
+          </p>
+        )}
+        {isOT && !isOTSheet && (
           <p className="text-xs text-muted-foreground">
             {claim.hours1_5 && parseFloat(String(claim.hours1_5)) > 0 && `1.5× ${claim.hours1_5}h`}
             {claim.hours1_5 && parseFloat(String(claim.hours1_5)) > 0 && claim.hours2 && parseFloat(String(claim.hours2)) > 0 && " · "}

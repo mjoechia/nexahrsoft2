@@ -7798,6 +7798,126 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return;
       }
 
+      // ── OT Timesheet (Monthly) claim path ─────────────────────────────
+      if (req.body.claimType === 'ot_timesheet') {
+        const claimMonth = parseInt(req.body.claimMonth);
+        const claimYear  = parseInt(req.body.claimYear);
+
+        if (!claimMonth || claimMonth < 1 || claimMonth > 12 || !claimYear || claimYear < 2020) {
+          return res.status(400).json({ message: "Invalid claim month or year." });
+        }
+
+        let rows: import("../shared/schema").TimesheetRow[];
+        try {
+          rows = JSON.parse(req.body.timesheetRows || "[]");
+          if (!Array.isArray(rows) || rows.length === 0 || rows.length > 31) throw new Error();
+        } catch {
+          return res.status(400).json({ message: "Invalid timesheet data." });
+        }
+
+        // Row-level validation
+        const timeRe = /^\d{2}:\d{2}$/;
+        for (const r of rows) {
+          const h1 = Number(r.hours1_5) || 0;
+          const h2 = Number(r.hours2)   || 0;
+          if (h1 < 0 || h2 < 0 || h1 > 24 || h2 > 24) {
+            return res.status(400).json({ message: `Invalid OT hours on ${r.date}.` });
+          }
+          if (h1 > 0 || h2 > 0) {
+            if (!r.customerName?.trim()) {
+              return res.status(400).json({ message: `Customer name required for ${r.date} (has OT hours).` });
+            }
+            if (!r.projectNumber?.trim()) {
+              return res.status(400).json({ message: `Project number required for ${r.date} (has OT hours).` });
+            }
+          }
+          if (r.timeIn && !timeRe.test(r.timeIn)) {
+            return res.status(400).json({ message: `Time-In on ${r.date} must be HH:mm format.` });
+          }
+          if (r.timeOut && !timeRe.test(r.timeOut)) {
+            return res.status(400).json({ message: `Time-Out on ${r.date} must be HH:mm format.` });
+          }
+          if (r.timeIn && r.timeOut && r.timeOut <= r.timeIn) {
+            return res.status(400).json({ message: `Time-Out must be after Time-In on ${r.date}.` });
+          }
+        }
+
+        const totalHours1_5 = rows.reduce((s, r) => s + (Number(r.hours1_5) || 0), 0);
+        const totalHours2   = rows.reduce((s, r) => s + (Number(r.hours2)   || 0), 0);
+
+        if (totalHours1_5 === 0 && totalHours2 === 0) {
+          return res.status(400).json({ message: "Please enter overtime hours for at least one day." });
+        }
+
+        // Duplicate check: one ot_timesheet per (user, month, year)
+        const { claims: claimsTable } = await import("../shared/schema");
+        const existing = await db.select({ id: claimsTable.id })
+          .from(claimsTable)
+          .where(and(
+            eq(claimsTable.userId, userId),
+            eq(claimsTable.claimType, 'ot_timesheet'),
+            eq(claimsTable.claimMonth, claimMonth),
+            eq(claimsTable.claimYear, claimYear),
+          ))
+          .limit(1);
+        if (existing.length > 0) {
+          return res.status(400).json({ message: "An OT Timesheet for this month has already been submitted." });
+        }
+
+        // Calculate OT pay — never expose rate to client
+        const employee = await storage.getUser(userId);
+        const hourlyRate = parseFloat(String(employee?.hourlyRate || '0'));
+        const hourlyRateMissing = hourlyRate <= 0;
+        const ot1_5Pay = hourlyRateMissing ? 0 : hourlyRate * 1.5 * totalHours1_5;
+        const ot2Pay   = hourlyRateMissing ? 0 : hourlyRate * 2   * totalHours2;
+        const totalOT  = parseFloat((ot1_5Pay + ot2Pay).toFixed(2));
+
+        // Upload proof files
+        const objectStorageService = new ObjectStorageService();
+        const otFileRecords: { url: string; name: string }[] = [];
+        if (uploadedFiles?.files) {
+          for (const f of uploadedFiles.files) {
+            const url = await objectStorageService.uploadPrivateFile(
+              f.buffer, f.originalname, f.mimetype, `claims-ot/${userId}`
+            );
+            otFileRecords.push({ url, name: f.originalname });
+          }
+        }
+
+        const descriptionParts = [];
+        if (hourlyRateMissing) descriptionParts.push('⚠️ Hourly rate not set — please configure this employee\'s hourly rate and recalculate.');
+        if (req.body.notes) descriptionParts.push(req.body.notes);
+
+        const monthStr = String(claimMonth).padStart(2, '0');
+        const workDate = `${claimYear}-${monthStr}-01`;
+
+        const claim = await storage.createClaim({
+          userId,
+          employeeCode: employee?.employeeCode || null,
+          employeeName: employee?.name || 'Unknown',
+          claimType: 'ot_timesheet',
+          amount: String(totalOT),
+          description: descriptionParts.join(' ') || null,
+          receiptUrl: null,
+          receiptFileName: null,
+          claimMonth,
+          claimYear,
+          status: 'pending',
+          workDate,
+          hours1_5: String(totalHours1_5),
+          hours2: String(totalHours2),
+          calculatedAmount: hourlyRateMissing ? null : String(totalOT),
+          otFiles: otFileRecords.length > 0 ? JSON.stringify(otFileRecords) : null,
+          timesheetRows: JSON.stringify(rows),
+          totalHours1_5: String(totalHours1_5),
+          totalHours2: String(totalHours2),
+        } as any);
+
+        const { calculatedAmount: _ca2, ...safeSheet } = claim as any;
+        res.json({ success: true, claim: safeSheet });
+        return;
+      }
+
       // ── Non-OT claim path ──────────────────────────────────────────────
       const claimSchema = z.object({
         claimType: z.enum(["transport", "material_purchase", "other"]),

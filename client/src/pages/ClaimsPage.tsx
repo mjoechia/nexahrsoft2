@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { Receipt, Plus, Upload, X, FileText, Clock, CheckCircle, XCircle, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,7 +22,7 @@ import {
 } from "@/components/ui/select";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
-import type { Claim } from "@shared/schema";
+import type { Claim, TimesheetRow } from "@shared/schema";
 import { claimTypeLabels } from "@shared/schema";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
@@ -33,7 +33,11 @@ const CLAIM_TYPES = [
   { value: "material_purchase", label: "Material Purchase" },
   { value: "other", label: "Other" },
   { value: "overtime", label: "Overtime (OT)" },
+  { value: "ot_timesheet", label: "OT Timesheet (Monthly)" },
 ];
+
+const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+const DAY_NAMES   = ["SUN","MON","TUE","WED","THU","FRI","SAT"];
 
 const ALLOWED_FILE_TYPES = ".pdf,.jpg,.jpeg,.png";
 const MAX_FILE_SIZE_MB = 5;
@@ -53,6 +57,11 @@ export default function ClaimsPage() {
   const [otNotes, setOtNotes] = useState("");
   const [otFiles, setOtFiles] = useState<File[]>([]);
 
+  // OT Timesheet state
+  const [timesheetMonth, setTimesheetMonth] = useState(new Date().getMonth() + 1);
+  const [timesheetYear, setTimesheetYear]   = useState(new Date().getFullYear());
+  const [timesheetRows, setTimesheetRows]   = useState<TimesheetRow[]>([]);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const otFilesInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
@@ -60,6 +69,39 @@ export default function ClaimsPage() {
   const currentDate = new Date();
   const currentMonth = currentDate.getMonth() + 1;
   const currentYear = currentDate.getFullYear();
+
+  const isOTSheet = claimType === "ot_timesheet";
+
+  const generateTimesheetRows = useCallback((month: number, year: number): TimesheetRow[] => {
+    const daysInMonth = new Date(year, month, 0).getDate();
+    return Array.from({ length: daysInMonth }, (_, i) => {
+      const d = new Date(year, month - 1, i + 1);
+      return {
+        date: `${String(i + 1).padStart(2, "0")}/${String(month).padStart(2, "0")}/${year}`,
+        dayName: DAY_NAMES[d.getDay()],
+        customerName: "",
+        projectNumber: "",
+        timeIn: "",
+        timeOut: "",
+        hours1_5: 0,
+        hours2: 0,
+      };
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!isOTSheet) return;
+    setTimesheetRows(generateTimesheetRows(timesheetMonth, timesheetYear));
+  }, [isOTSheet, timesheetMonth, timesheetYear, generateTimesheetRows]);
+
+  const updateTimesheetRow = (idx: number, field: keyof TimesheetRow, value: string | number) => {
+    setTimesheetRows(prev => prev.map((r, i) => i === idx ? { ...r, [field]: value } : r));
+  };
+
+  const timesheetTotal1_5 = timesheetRows.reduce((s, r) => s + (Number(r.hours1_5) || 0), 0);
+  const timesheetTotal2   = timesheetRows.reduce((s, r) => s + (Number(r.hours2)   || 0), 0);
+
+  const yearOptions = Array.from({ length: 5 }, (_, i) => currentYear - 2 + i);
 
   const { data: claimsData, isLoading } = useQuery<{ claims: Claim[] }>({
     queryKey: ["/api/claims"],
@@ -77,6 +119,9 @@ export default function ClaimsPage() {
     setHours2("");
     setOtNotes("");
     setOtFiles([]);
+    setTimesheetMonth(new Date().getMonth() + 1);
+    setTimesheetYear(new Date().getFullYear());
+    setTimesheetRows([]);
   };
 
   const submitMutation = useMutation({
@@ -86,7 +131,15 @@ export default function ClaimsPage() {
       formData.append("claimMonth", currentMonth.toString());
       formData.append("claimYear", currentYear.toString());
 
-      if (isOT) {
+      if (isOTSheet) {
+        formData.append("timesheetRows", JSON.stringify(timesheetRows));
+        formData.append("claimMonth", timesheetMonth.toString());
+        formData.append("claimYear", timesheetYear.toString());
+        formData.append("notes", otNotes);
+        for (const f of otFiles) {
+          formData.append("files", f);
+        }
+      } else if (isOT) {
         formData.append("workDate", workDate);
         formData.append("hours1_5", hours1_5 || "0");
         formData.append("hours2", hours2 || "0");
@@ -171,7 +224,12 @@ export default function ClaimsPage() {
       toast({ title: "Missing Fields", description: "Please select a claim type", variant: "destructive" });
       return;
     }
-    if (isOT) {
+    if (isOTSheet) {
+      if (timesheetTotal1_5 === 0 && timesheetTotal2 === 0) {
+        toast({ title: "Missing Hours", description: "Please enter overtime hours for at least one day.", variant: "destructive" });
+        return;
+      }
+    } else if (isOT) {
       if (!workDate) {
         toast({ title: "Missing Fields", description: "Please select a work date", variant: "destructive" });
         return;
@@ -231,7 +289,7 @@ export default function ClaimsPage() {
                 New Claim
               </Button>
             </DialogTrigger>
-            <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
+            <DialogContent className={isOTSheet ? "sm:max-w-5xl max-h-[90vh] overflow-y-auto" : "sm:max-w-md max-h-[90vh] overflow-y-auto"}>
               <DialogHeader>
                 <DialogTitle>Submit New Claim</DialogTitle>
               </DialogHeader>
@@ -359,8 +417,188 @@ export default function ClaimsPage() {
                   </>
                 )}
 
+                {/* ── OT TIMESHEET FORM ── */}
+                {isOTSheet && (
+                  <>
+                    <div className="p-3 bg-muted/60 rounded-md flex items-start gap-2 text-sm text-muted-foreground">
+                      <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+                      <span>Fill in daily OT hours for the selected month. Rows with OT hours require Customer Name and Project Number.</span>
+                    </div>
+
+                    {/* Month / Year selectors */}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <Label>Month</Label>
+                        <Select
+                          value={String(timesheetMonth)}
+                          onValueChange={(v) => {
+                            const hasData = timesheetRows.some(r => r.customerName || r.timeIn || r.hours1_5 > 0 || r.hours2 > 0);
+                            if (hasData && !window.confirm("Changing month will reset all entered data. Continue?")) return;
+                            setTimesheetMonth(Number(v));
+                          }}
+                        >
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            {MONTH_NAMES.map((name, i) => (
+                              <SelectItem key={i + 1} value={String(i + 1)}>{name}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1">
+                        <Label>Year</Label>
+                        <Select
+                          value={String(timesheetYear)}
+                          onValueChange={(v) => {
+                            const hasData = timesheetRows.some(r => r.customerName || r.timeIn || r.hours1_5 > 0 || r.hours2 > 0);
+                            if (hasData && !window.confirm("Changing year will reset all entered data. Continue?")) return;
+                            setTimesheetYear(Number(v));
+                          }}
+                        >
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            {yearOptions.map(y => (
+                              <SelectItem key={y} value={String(y)}>{y}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+
+                    {/* Timesheet table */}
+                    <div className="overflow-auto max-h-96 border rounded-md">
+                      <table className="w-full text-sm border-collapse">
+                        <thead className="bg-muted sticky top-0">
+                          <tr>
+                            <th className="px-2 py-2 text-left font-medium border-b w-16">Date</th>
+                            <th className="px-2 py-2 text-left font-medium border-b w-12">Day</th>
+                            <th className="px-2 py-2 text-left font-medium border-b">Customer Name</th>
+                            <th className="px-2 py-2 text-left font-medium border-b w-24">Proj #</th>
+                            <th className="px-2 py-2 text-left font-medium border-b w-20">Time-In</th>
+                            <th className="px-2 py-2 text-left font-medium border-b w-20">Time-Out</th>
+                            <th className="px-2 py-2 text-center font-medium border-b w-16">1.5×h</th>
+                            <th className="px-2 py-2 text-center font-medium border-b w-16">2×h</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {timesheetRows.map((row, idx) => {
+                            const isWeekend = row.dayName === "SAT" || row.dayName === "SUN";
+                            return (
+                              <tr key={idx} className={isWeekend ? "bg-muted/40" : ""}>
+                                <td className="px-2 py-1 border-b text-xs text-muted-foreground whitespace-nowrap">{row.date}</td>
+                                <td className="px-2 py-1 border-b text-xs font-medium">{row.dayName}</td>
+                                <td className="px-1 py-1 border-b">
+                                  <Input
+                                    className="h-7 text-xs px-1"
+                                    value={row.customerName}
+                                    onChange={e => updateTimesheetRow(idx, "customerName", e.target.value)}
+                                    placeholder="Customer / Location"
+                                  />
+                                </td>
+                                <td className="px-1 py-1 border-b">
+                                  <Input
+                                    className="h-7 text-xs px-1"
+                                    value={row.projectNumber}
+                                    onChange={e => updateTimesheetRow(idx, "projectNumber", e.target.value)}
+                                    placeholder="Proj #"
+                                  />
+                                </td>
+                                <td className="px-1 py-1 border-b">
+                                  <Input
+                                    className="h-7 text-xs px-1"
+                                    value={row.timeIn}
+                                    onChange={e => updateTimesheetRow(idx, "timeIn", e.target.value)}
+                                    placeholder="09:00"
+                                  />
+                                </td>
+                                <td className="px-1 py-1 border-b">
+                                  <Input
+                                    className="h-7 text-xs px-1"
+                                    value={row.timeOut}
+                                    onChange={e => updateTimesheetRow(idx, "timeOut", e.target.value)}
+                                    placeholder="18:00"
+                                  />
+                                </td>
+                                <td className="px-1 py-1 border-b">
+                                  <Input
+                                    type="number"
+                                    className="h-7 text-xs px-1 text-center"
+                                    step="0.5"
+                                    min="0"
+                                    value={row.hours1_5 || ""}
+                                    onChange={e => updateTimesheetRow(idx, "hours1_5", parseFloat(e.target.value) || 0)}
+                                    placeholder="0"
+                                  />
+                                </td>
+                                <td className="px-1 py-1 border-b">
+                                  <Input
+                                    type="number"
+                                    className="h-7 text-xs px-1 text-center"
+                                    step="0.5"
+                                    min="0"
+                                    value={row.hours2 || ""}
+                                    onChange={e => updateTimesheetRow(idx, "hours2", parseFloat(e.target.value) || 0)}
+                                    placeholder="0"
+                                  />
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                        <tfoot className="bg-muted sticky bottom-0">
+                          <tr>
+                            <td colSpan={6} className="px-2 py-2 text-right font-semibold text-sm border-t">TOTAL</td>
+                            <td className="px-2 py-2 text-center font-semibold border-t">{timesheetTotal1_5 || ""}</td>
+                            <td className="px-2 py-2 text-center font-semibold border-t">{timesheetTotal2 || ""}</td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+
+                    {/* Notes */}
+                    <div className="space-y-2">
+                      <Label>Notes (Optional)</Label>
+                      <Textarea
+                        value={otNotes}
+                        onChange={(e) => setOtNotes(e.target.value)}
+                        placeholder="Additional remarks..."
+                        rows={2}
+                      />
+                    </div>
+
+                    {/* File upload (reuse OT file logic) */}
+                    <div className="space-y-2">
+                      <Label>Supporting Documents (Optional, up to {MAX_OT_FILES} files)</Label>
+                      <input
+                        ref={otFilesInputRef}
+                        type="file"
+                        accept={ALLOWED_FILE_TYPES}
+                        multiple
+                        onChange={handleOtFilesChange}
+                        className="hidden"
+                      />
+                      {otFiles.length < MAX_OT_FILES && (
+                        <Button type="button" variant="outline" className="w-full" onClick={() => otFilesInputRef.current?.click()}>
+                          <Upload className="h-4 w-4 mr-2" />
+                          Add File ({otFiles.length}/{MAX_OT_FILES})
+                        </Button>
+                      )}
+                      {otFiles.map((f, idx) => (
+                        <div key={idx} className="flex items-center gap-2 p-2 bg-muted rounded-md text-sm">
+                          <FileText className="h-4 w-4 shrink-0" />
+                          <span className="flex-1 truncate">{f.name}</span>
+                          <Button type="button" variant="ghost" size="icon" className="h-6 w-6" onClick={() => removeOtFile(idx)}>
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ))}
+                      <p className="text-xs text-muted-foreground">PDF, JPG, PNG — max {MAX_FILE_SIZE_MB}MB each</p>
+                    </div>
+                  </>
+                )}
+
                 {/* ── NON-OT FORM ── */}
-                {claimType && !isOT && (
+                {claimType && !isOT && !isOTSheet && (
                   <>
                     <div className="space-y-2">
                       <Label htmlFor="amount">Amount ($) *</Label>
@@ -489,7 +727,13 @@ export default function ClaimsPage() {
                         </span>
                         {getStatusBadge(claim.status)}
                       </div>
-                      {claim.claimType === "overtime" && claim.workDate ? (
+                      {claim.claimType === "ot_timesheet" ? (
+                        <p className="text-sm text-muted-foreground">
+                          {MONTH_NAMES[(claim.claimMonth ?? 1) - 1]} {claim.claimYear}
+                          {(claim as any).totalHours1_5 && parseFloat(String((claim as any).totalHours1_5)) > 0 && ` • 1.5× ${(claim as any).totalHours1_5}h`}
+                          {(claim as any).totalHours2 && parseFloat(String((claim as any).totalHours2)) > 0 && ` • 2× ${(claim as any).totalHours2}h`}
+                        </p>
+                      ) : claim.claimType === "overtime" && claim.workDate ? (
                         <p className="text-sm text-muted-foreground">
                           Work Date: {format(new Date(claim.workDate + 'T00:00:00'), "dd MMM yyyy")}
                           {claim.hours1_5 && parseFloat(String(claim.hours1_5)) > 0 && ` • 1.5× ${claim.hours1_5}h`}
@@ -512,7 +756,7 @@ export default function ClaimsPage() {
                       )}
                     </div>
                     <div className="text-right">
-                      {claim.claimType === "overtime" ? (
+                      {claim.claimType === "overtime" || claim.claimType === "ot_timesheet" ? (
                         <p className="text-sm text-muted-foreground italic">Pending calculation</p>
                       ) : (
                         <p className="text-lg font-semibold">

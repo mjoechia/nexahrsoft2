@@ -929,7 +929,7 @@ export type InsertManualPayslipAuditLog = z.infer<typeof insertManualPayslipAudi
 export type ManualPayslipAuditLog = typeof manualPayslipAuditLogs.$inferSelect;
 
 // Claims System
-export const claimTypes = ["transport", "material_purchase", "other", "overtime"] as const;
+export const claimTypes = ["transport", "material_purchase", "other", "overtime", "ot_timesheet"] as const;
 export type ClaimType = typeof claimTypes[number];
 
 export const claimTypeLabels: Record<ClaimType, string> = {
@@ -937,6 +937,18 @@ export const claimTypeLabels: Record<ClaimType, string> = {
   material_purchase: "Material Purchase",
   other: "Other",
   overtime: "Overtime",
+  ot_timesheet: "OT Timesheet (Monthly)",
+};
+
+export type TimesheetRow = {
+  date: string;          // "DD/MM/YYYY"
+  dayName: string;       // "MON", "TUE", etc.
+  customerName: string;
+  projectNumber: string;
+  timeIn: string;        // "HH:mm" 24h
+  timeOut: string;       // "HH:mm"
+  hours1_5: number;
+  hours2: number;
 };
 
 export const claims = appSchema.table("claims", {
@@ -962,6 +974,10 @@ export const claims = appSchema.table("claims", {
   hours2: numeric("hours_2", { precision: 4, scale: 2 }), // 2x OT hours
   calculatedAmount: numeric("calculated_amount", { precision: 10, scale: 2 }), // Server-computed OT pay (never sent to employee)
   otFiles: text("ot_files"), // JSON array of {url, name} for multiple proof files
+  // OT Timesheet (Monthly) specific fields
+  timesheetRows: text("timesheet_rows"), // JSON string of TimesheetRow[]
+  totalHours1_5: numeric("total_hours_1_5", { precision: 6, scale: 2 }), // Sum of 1.5x hours across all rows
+  totalHours2: numeric("total_hours_2", { precision: 6, scale: 2 }),     // Sum of 2x hours across all rows
 });
 
 export const insertClaimSchema = createInsertSchema(claims).omit({
