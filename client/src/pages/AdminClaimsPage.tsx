@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Receipt, Clock, CheckCircle, XCircle, Eye, Filter, ArrowLeft, FileText, ExternalLink, Trash2, History, AlertTriangle, RefreshCw, CheckCheck } from "lucide-react";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { Receipt, Clock, CheckCircle, XCircle, Eye, Filter, ArrowLeft, FileText, ExternalLink, Trash2, History, AlertTriangle, RefreshCw, CheckCheck, Plus, Upload, X, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -20,6 +20,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogTrigger,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -44,6 +45,18 @@ const MONTH_NAMES = [
   "Jan", "Feb", "Mar", "Apr", "May", "Jun",
   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
 ];
+const MONTH_NAMES_FULL = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+const DAY_NAMES = ["SUN","MON","TUE","WED","THU","FRI","SAT"];
+const CLAIM_TYPES_ADMIN = [
+  { value: "transport",         label: "Transport" },
+  { value: "material_purchase", label: "Material Purchase" },
+  { value: "other",             label: "Other" },
+  { value: "overtime",          label: "Overtime (OT)" },
+  { value: "ot_timesheet",      label: "OT Timesheet (Monthly)" },
+];
+const ALLOWED_FILE_TYPES = ".pdf,.jpg,.jpeg,.png";
+const MAX_FILE_SIZE_MB = 5;
+const MAX_OT_FILES = 5;
 
 function generatePeriodOptions() {
   const options: { value: string; label: string; month: number; year: number }[] = [];
@@ -107,6 +120,105 @@ export default function AdminClaimsPage() {
   const [pendingSearch, setPendingSearch] = useState("");
   const { toast } = useToast();
 
+  // ── Add Claim (admin on behalf of employee) ──────────────────────────────
+  const [addClaimOpen, setAddClaimOpen] = useState(false);
+  const [acTargetUserId, setAcTargetUserId] = useState("");
+  const [acClaimType, setAcClaimType] = useState("");
+  // Non-OT fields
+  const [acAmount, setAcAmount] = useState("");
+  const [acDescription, setAcDescription] = useState("");
+  const [acReceiptFile, setAcReceiptFile] = useState<File | null>(null);
+  // Single-day OT fields
+  const [acWorkDate, setAcWorkDate] = useState("");
+  const [acHours1_5, setAcHours1_5] = useState("");
+  const [acHours2, setAcHours2] = useState("");
+  const [acOtNotes, setAcOtNotes] = useState("");
+  const [acOtFiles, setAcOtFiles] = useState<File[]>([]);
+  // OT Timesheet fields
+  const [acTsMonth, setAcTsMonth] = useState(new Date().getMonth() + 1);
+  const [acTsYear, setAcTsYear]   = useState(new Date().getFullYear());
+  const [acTsRows, setAcTsRows]   = useState<TimesheetRow[]>([]);
+  // Period (for non-OT and single-day OT)
+  const [acClaimMonth, setAcClaimMonth] = useState(new Date().getMonth() + 1);
+  const [acClaimYear, setAcClaimYear]   = useState(new Date().getFullYear());
+
+  const acReceiptRef = useRef<HTMLInputElement>(null);
+  const acOtFilesRef = useRef<HTMLInputElement>(null);
+
+  const currentYear = new Date().getFullYear();
+  const acYearOptions = Array.from({ length: 5 }, (_, i) => currentYear - 2 + i);
+
+  const acIsOT      = acClaimType === "overtime";
+  const acIsOTSheet = acClaimType === "ot_timesheet";
+
+  const generateAcTimesheetRows = useCallback((month: number, year: number): TimesheetRow[] => {
+    const days = new Date(year, month, 0).getDate();
+    return Array.from({ length: days }, (_, i) => {
+      const d = new Date(year, month - 1, i + 1);
+      return { date: `${String(i+1).padStart(2,"0")}/${String(month).padStart(2,"0")}/${year}`, dayName: DAY_NAMES[d.getDay()], customerName: "", projectNumber: "", timeIn: "", timeOut: "", hours1_5: 0, hours2: 0 };
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!acIsOTSheet) return;
+    setAcTsRows(generateAcTimesheetRows(acTsMonth, acTsYear));
+  }, [acIsOTSheet, acTsMonth, acTsYear, generateAcTimesheetRows]);
+
+  const updateAcRow = (idx: number, field: keyof TimesheetRow, value: string | number) =>
+    setAcTsRows(prev => prev.map((r, i) => i === idx ? { ...r, [field]: value } : r));
+
+  const acTotal1_5 = acTsRows.reduce((s, r) => s + (Number(r.hours1_5) || 0), 0);
+  const acTotal2   = acTsRows.reduce((s, r) => s + (Number(r.hours2)   || 0), 0);
+
+  const resetAddClaim = () => {
+    setAcTargetUserId(""); setAcClaimType(""); setAcAmount(""); setAcDescription("");
+    setAcReceiptFile(null); setAcWorkDate(""); setAcHours1_5(""); setAcHours2("");
+    setAcOtNotes(""); setAcOtFiles([]); setAcTsRows([]);
+    setAcTsMonth(new Date().getMonth() + 1); setAcTsYear(new Date().getFullYear());
+    setAcClaimMonth(new Date().getMonth() + 1); setAcClaimYear(new Date().getFullYear());
+  };
+
+  const addClaimMutation = useMutation({
+    mutationFn: async () => {
+      const fd = new FormData();
+      fd.append("targetUserId", acTargetUserId);
+      fd.append("claimType", acClaimType);
+
+      if (acIsOTSheet) {
+        fd.append("timesheetRows", JSON.stringify(acTsRows));
+        fd.append("claimMonth", String(acTsMonth));
+        fd.append("claimYear",  String(acTsYear));
+        fd.append("notes", acOtNotes);
+        for (const f of acOtFiles) fd.append("files", f);
+      } else if (acIsOT) {
+        fd.append("workDate", acWorkDate);
+        fd.append("hours1_5", acHours1_5 || "0");
+        fd.append("hours2",   acHours2   || "0");
+        fd.append("notes", acOtNotes);
+        fd.append("claimMonth", String(acClaimMonth));
+        fd.append("claimYear",  String(acClaimYear));
+        for (const f of acOtFiles) fd.append("files", f);
+      } else {
+        fd.append("amount", acAmount);
+        fd.append("description", acDescription);
+        fd.append("claimMonth", String(acClaimMonth));
+        fd.append("claimYear",  String(acClaimYear));
+        if (acReceiptFile) fd.append("receipt", acReceiptFile);
+      }
+
+      const res = await fetch("/api/admin/claims/create-for-employee", { method: "POST", body: fd, credentials: "include" });
+      if (!res.ok) { const e = await res.json(); throw new Error(e.message || "Failed"); }
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Claim Added", description: "Claim has been created for the employee." });
+      setAddClaimOpen(false);
+      resetAddClaim();
+      invalidateClaims();
+    },
+    onError: (e: Error) => toast({ title: "Failed", description: e.message, variant: "destructive" }),
+  });
+
   const [selectedMonth, selectedYear] = selectedPeriod.split("-").map(Number);
   const selectedMonthStr = String(selectedMonth);
   const selectedYearStr = String(selectedYear);
@@ -139,6 +251,11 @@ export default function AdminClaimsPage() {
     queryClient.invalidateQueries({ queryKey: ["/api/admin/claims/pending-count"] });
     queryClient.invalidateQueries({ queryKey: ["/api/admin/claims/audit-log"] });
   };
+
+  const { data: employeeList } = useQuery<{ id: string; name: string; employeeCode: string | null }[]>({
+    queryKey: ["/api/admin/users"],
+    enabled: addClaimOpen,
+  });
 
   const deleteClaimMutation = useMutation({
     mutationFn: async ({ id, reason }: { id: string; reason: string }) =>
@@ -296,6 +413,10 @@ export default function AdminClaimsPage() {
                       className="w-52"
                       data-testid="input-pending-search"
                     />
+                    <Button size="sm" onClick={() => setAddClaimOpen(true)} data-testid="button-add-claim-for-employee">
+                      <Plus className="h-4 w-4 mr-1" />
+                      Add Claim
+                    </Button>
                     <PeriodSelector />
                   </div>
                 </div>
@@ -537,6 +658,273 @@ export default function AdminClaimsPage() {
             </Card>
           </TabsContent>
         </Tabs>
+
+        {/* ── ADD CLAIM FOR EMPLOYEE DIALOG ── */}
+        <Dialog open={addClaimOpen} onOpenChange={(v) => { setAddClaimOpen(v); if (!v) resetAddClaim(); }}>
+          <DialogContent className={acIsOTSheet ? "sm:max-w-5xl max-h-[90vh] overflow-y-auto" : "sm:max-w-lg max-h-[90vh] overflow-y-auto"}>
+            <DialogHeader>
+              <DialogTitle>Add Claim for Employee</DialogTitle>
+            </DialogHeader>
+            <form
+              onSubmit={e => {
+                e.preventDefault();
+                if (!acTargetUserId) return toast({ title: "Select an employee", variant: "destructive" });
+                if (!acClaimType)    return toast({ title: "Select a claim type", variant: "destructive" });
+                if (acIsOTSheet && acTotal1_5 === 0 && acTotal2 === 0)
+                  return toast({ title: "Enter OT hours for at least one day", variant: "destructive" });
+                if (acIsOT && !acWorkDate)
+                  return toast({ title: "Enter a work date", variant: "destructive" });
+                if (acIsOT && parseFloat(acHours1_5 || "0") + parseFloat(acHours2 || "0") === 0)
+                  return toast({ title: "Enter overtime hours", variant: "destructive" });
+                if (!acIsOT && !acIsOTSheet && (!acAmount || parseFloat(acAmount) <= 0))
+                  return toast({ title: "Enter a valid amount", variant: "destructive" });
+                addClaimMutation.mutate();
+              }}
+              className="space-y-4 mt-2"
+            >
+              {/* Employee selector */}
+              <div className="space-y-1">
+                <Label>Employee *</Label>
+                <Select value={acTargetUserId} onValueChange={setAcTargetUserId}>
+                  <SelectTrigger data-testid="select-ac-employee">
+                    <SelectValue placeholder="Select employee..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(employeeList || [])
+                      .filter(u => u.id)
+                      .sort((a, b) => (a.name || "").localeCompare(b.name || ""))
+                      .map(u => (
+                        <SelectItem key={u.id} value={u.id}>
+                          {toTitleCase(u.name)} {u.employeeCode ? `(${u.employeeCode})` : ""}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Claim type selector */}
+              <div className="space-y-1">
+                <Label>Claim Type *</Label>
+                <Select value={acClaimType} onValueChange={v => { setAcClaimType(v); setAcTsRows([]); }}>
+                  <SelectTrigger data-testid="select-ac-claim-type">
+                    <SelectValue placeholder="Select type..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {CLAIM_TYPES_ADMIN.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* ── OT TIMESHEET FORM ── */}
+              {acIsOTSheet && (
+                <>
+                  <div className="p-3 bg-muted/60 rounded-md flex items-start gap-2 text-sm text-muted-foreground">
+                    <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+                    <span>Fill in daily OT hours. Rows with OT hours require Customer Name and Project Number.</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <Label>Month</Label>
+                      <Select value={String(acTsMonth)} onValueChange={v => {
+                        const hasData = acTsRows.some(r => r.customerName || r.hours1_5 > 0 || r.hours2 > 0);
+                        if (hasData && !window.confirm("Changing month will reset entered data. Continue?")) return;
+                        setAcTsMonth(Number(v));
+                      }}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>{MONTH_NAMES_FULL.map((n, i) => <SelectItem key={i+1} value={String(i+1)}>{n}</SelectItem>)}</SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1">
+                      <Label>Year</Label>
+                      <Select value={String(acTsYear)} onValueChange={v => {
+                        const hasData = acTsRows.some(r => r.customerName || r.hours1_5 > 0 || r.hours2 > 0);
+                        if (hasData && !window.confirm("Changing year will reset entered data. Continue?")) return;
+                        setAcTsYear(Number(v));
+                      }}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>{acYearOptions.map(y => <SelectItem key={y} value={String(y)}>{y}</SelectItem>)}</SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <div className="overflow-auto max-h-96 border rounded-md">
+                    <table className="w-full text-sm border-collapse">
+                      <thead className="bg-muted sticky top-0">
+                        <tr>
+                          <th className="px-2 py-2 text-left font-medium border-b w-16">Date</th>
+                          <th className="px-2 py-2 text-left font-medium border-b w-12">Day</th>
+                          <th className="px-2 py-2 text-left font-medium border-b">Customer Name</th>
+                          <th className="px-2 py-2 text-left font-medium border-b w-24">Proj #</th>
+                          <th className="px-2 py-2 text-left font-medium border-b w-20">Time-In</th>
+                          <th className="px-2 py-2 text-left font-medium border-b w-20">Time-Out</th>
+                          <th className="px-2 py-2 text-center font-medium border-b w-16">1.5×h</th>
+                          <th className="px-2 py-2 text-center font-medium border-b w-16">2×h</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {acTsRows.map((row, idx) => {
+                          const isWeekend = row.dayName === "SAT" || row.dayName === "SUN";
+                          return (
+                            <tr key={idx} className={isWeekend ? "bg-muted/40" : ""}>
+                              <td className="px-2 py-1 border-b text-xs text-muted-foreground whitespace-nowrap">{row.date}</td>
+                              <td className="px-2 py-1 border-b text-xs font-medium">{row.dayName}</td>
+                              <td className="px-1 py-1 border-b"><Input className="h-7 text-xs px-1" value={row.customerName} onChange={e => updateAcRow(idx, "customerName", e.target.value)} placeholder="Customer / Location" /></td>
+                              <td className="px-1 py-1 border-b"><Input className="h-7 text-xs px-1" value={row.projectNumber} onChange={e => updateAcRow(idx, "projectNumber", e.target.value)} placeholder="Proj #" /></td>
+                              <td className="px-1 py-1 border-b"><Input className="h-7 text-xs px-1" value={row.timeIn} onChange={e => updateAcRow(idx, "timeIn", e.target.value)} placeholder="09:00" /></td>
+                              <td className="px-1 py-1 border-b"><Input className="h-7 text-xs px-1" value={row.timeOut} onChange={e => updateAcRow(idx, "timeOut", e.target.value)} placeholder="18:00" /></td>
+                              <td className="px-1 py-1 border-b"><Input type="number" className="h-7 text-xs px-1 text-center" step="0.5" min="0" value={row.hours1_5 || ""} onChange={e => updateAcRow(idx, "hours1_5", parseFloat(e.target.value) || 0)} placeholder="0" /></td>
+                              <td className="px-1 py-1 border-b"><Input type="number" className="h-7 text-xs px-1 text-center" step="0.5" min="0" value={row.hours2 || ""} onChange={e => updateAcRow(idx, "hours2", parseFloat(e.target.value) || 0)} placeholder="0" /></td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                      <tfoot className="bg-muted sticky bottom-0">
+                        <tr>
+                          <td colSpan={6} className="px-2 py-2 text-right font-semibold text-sm border-t">TOTAL</td>
+                          <td className="px-2 py-2 text-center font-semibold border-t">{acTotal1_5 || ""}</td>
+                          <td className="px-2 py-2 text-center font-semibold border-t">{acTotal2 || ""}</td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                  <div className="space-y-1">
+                    <Label>Notes (Optional)</Label>
+                    <Textarea value={acOtNotes} onChange={e => setAcOtNotes(e.target.value)} placeholder="Additional remarks..." rows={2} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Supporting Documents (Optional, up to {MAX_OT_FILES} files)</Label>
+                    <input ref={acOtFilesRef} type="file" accept={ALLOWED_FILE_TYPES} multiple onChange={e => {
+                      const sel = Array.from(e.target.files || []).slice(0, MAX_OT_FILES - acOtFiles.length);
+                      if (sel.some(f => f.size > MAX_FILE_SIZE_MB * 1024 * 1024)) return toast({ title: "File too large", description: `Max ${MAX_FILE_SIZE_MB}MB each`, variant: "destructive" });
+                      setAcOtFiles(p => [...p, ...sel]);
+                      if (acOtFilesRef.current) acOtFilesRef.current.value = "";
+                    }} className="hidden" />
+                    {acOtFiles.length < MAX_OT_FILES && <Button type="button" variant="outline" className="w-full" onClick={() => acOtFilesRef.current?.click()}><Upload className="h-4 w-4 mr-2" />Add File ({acOtFiles.length}/{MAX_OT_FILES})</Button>}
+                    {acOtFiles.map((f, i) => (
+                      <div key={i} className="flex items-center gap-2 p-2 bg-muted rounded-md text-sm">
+                        <FileText className="h-4 w-4 shrink-0" /><span className="flex-1 truncate">{f.name}</span>
+                        <Button type="button" variant="ghost" size="icon" className="h-6 w-6" onClick={() => setAcOtFiles(p => p.filter((_, j) => j !== i))}><X className="h-4 w-4" /></Button>
+                      </div>
+                    ))}
+                    <p className="text-xs text-muted-foreground">PDF, JPG, PNG — max {MAX_FILE_SIZE_MB}MB each</p>
+                  </div>
+                </>
+              )}
+
+              {/* ── SINGLE-DAY OT FORM ── */}
+              {acIsOT && (
+                <>
+                  <div className="p-3 bg-muted/60 rounded-md flex items-start gap-2 text-sm text-muted-foreground">
+                    <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+                    <span>Overtime pay is calculated server-side from the employee's hourly rate.</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <Label>Work Date *</Label>
+                      <Input type="date" value={acWorkDate} onChange={e => setAcWorkDate(e.target.value)} max={new Date().toISOString().split("T")[0]} />
+                    </div>
+                    <div className="space-y-1">
+                      <Label>Period</Label>
+                      <div className="flex gap-1">
+                        <Select value={String(acClaimMonth)} onValueChange={v => setAcClaimMonth(Number(v))}>
+                          <SelectTrigger className="flex-1"><SelectValue /></SelectTrigger>
+                          <SelectContent>{MONTH_NAMES_FULL.map((n, i) => <SelectItem key={i+1} value={String(i+1)}>{n}</SelectItem>)}</SelectContent>
+                        </Select>
+                        <Select value={String(acClaimYear)} onValueChange={v => setAcClaimYear(Number(v))}>
+                          <SelectTrigger className="w-24"><SelectValue /></SelectTrigger>
+                          <SelectContent>{acYearOptions.map(y => <SelectItem key={y} value={String(y)}>{y}</SelectItem>)}</SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <Label>OT Hours (1.5×)</Label>
+                      <Input type="number" step="0.5" min="0" max="16" value={acHours1_5} onChange={e => setAcHours1_5(e.target.value)} placeholder="0" />
+                    </div>
+                    <div className="space-y-1">
+                      <Label>OT Hours (2×)</Label>
+                      <Input type="number" step="0.5" min="0" max="16" value={acHours2} onChange={e => setAcHours2(e.target.value)} placeholder="0" />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <Label>Notes (Optional)</Label>
+                    <Textarea value={acOtNotes} onChange={e => setAcOtNotes(e.target.value)} placeholder="e.g. project name, supervisor..." rows={2} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Supporting Documents (Optional, up to {MAX_OT_FILES} files)</Label>
+                    <input ref={acOtFilesRef} type="file" accept={ALLOWED_FILE_TYPES} multiple onChange={e => {
+                      const sel = Array.from(e.target.files || []).slice(0, MAX_OT_FILES - acOtFiles.length);
+                      if (sel.some(f => f.size > MAX_FILE_SIZE_MB * 1024 * 1024)) return toast({ title: "File too large", description: `Max ${MAX_FILE_SIZE_MB}MB each`, variant: "destructive" });
+                      setAcOtFiles(p => [...p, ...sel]);
+                      if (acOtFilesRef.current) acOtFilesRef.current.value = "";
+                    }} className="hidden" />
+                    {acOtFiles.length < MAX_OT_FILES && <Button type="button" variant="outline" className="w-full" onClick={() => acOtFilesRef.current?.click()}><Upload className="h-4 w-4 mr-2" />Add File ({acOtFiles.length}/{MAX_OT_FILES})</Button>}
+                    {acOtFiles.map((f, i) => (
+                      <div key={i} className="flex items-center gap-2 p-2 bg-muted rounded-md text-sm">
+                        <FileText className="h-4 w-4 shrink-0" /><span className="flex-1 truncate">{f.name}</span>
+                        <Button type="button" variant="ghost" size="icon" className="h-6 w-6" onClick={() => setAcOtFiles(p => p.filter((_, j) => j !== i))}><X className="h-4 w-4" /></Button>
+                      </div>
+                    ))}
+                    <p className="text-xs text-muted-foreground">PDF, JPG, PNG — max {MAX_FILE_SIZE_MB}MB each</p>
+                  </div>
+                </>
+              )}
+
+              {/* ── NON-OT FORM ── */}
+              {acClaimType && !acIsOT && !acIsOTSheet && (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <Label>Amount ($) *</Label>
+                      <Input type="number" step="0.01" min="0" value={acAmount} onChange={e => setAcAmount(e.target.value)} placeholder="0.00" />
+                    </div>
+                    <div className="space-y-1">
+                      <Label>Period</Label>
+                      <div className="flex gap-1">
+                        <Select value={String(acClaimMonth)} onValueChange={v => setAcClaimMonth(Number(v))}>
+                          <SelectTrigger className="flex-1"><SelectValue /></SelectTrigger>
+                          <SelectContent>{MONTH_NAMES_FULL.map((n, i) => <SelectItem key={i+1} value={String(i+1)}>{n}</SelectItem>)}</SelectContent>
+                        </Select>
+                        <Select value={String(acClaimYear)} onValueChange={v => setAcClaimYear(Number(v))}>
+                          <SelectTrigger className="w-24"><SelectValue /></SelectTrigger>
+                          <SelectContent>{acYearOptions.map(y => <SelectItem key={y} value={String(y)}>{y}</SelectItem>)}</SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <Label>Description</Label>
+                    <Textarea value={acDescription} onChange={e => setAcDescription(e.target.value)} placeholder="Brief description of the expense..." rows={3} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Receipt (Optional)</Label>
+                    <input ref={acReceiptRef} type="file" accept={ALLOWED_FILE_TYPES} onChange={e => {
+                      const f = e.target.files?.[0];
+                      if (f && f.size > MAX_FILE_SIZE_MB * 1024 * 1024) return toast({ title: "File too large", description: `Max ${MAX_FILE_SIZE_MB}MB`, variant: "destructive" });
+                      setAcReceiptFile(f || null);
+                    }} className="hidden" />
+                    {acReceiptFile ? (
+                      <div className="flex items-center gap-2 p-2 bg-muted rounded-md text-sm">
+                        <FileText className="h-4 w-4 shrink-0" /><span className="flex-1 truncate">{acReceiptFile.name}</span>
+                        <Button type="button" variant="ghost" size="icon" className="h-6 w-6" onClick={() => setAcReceiptFile(null)}><X className="h-4 w-4" /></Button>
+                      </div>
+                    ) : (
+                      <Button type="button" variant="outline" className="w-full" onClick={() => acReceiptRef.current?.click()}><Upload className="h-4 w-4 mr-2" />Upload Receipt</Button>
+                    )}
+                    <p className="text-xs text-muted-foreground">PDF, JPG, PNG — max {MAX_FILE_SIZE_MB}MB</p>
+                  </div>
+                </>
+              )}
+
+              <div className="flex gap-2 pt-2">
+                <Button type="button" variant="outline" className="flex-1" onClick={() => { setAddClaimOpen(false); resetAddClaim(); }}>Cancel</Button>
+                <Button type="submit" className="flex-1" disabled={addClaimMutation.isPending || !acTargetUserId || !acClaimType}>
+                  {addClaimMutation.isPending ? "Saving..." : "Add Claim"}
+                </Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
 
         {/* ── CLAIM DETAIL DIALOG ── */}
         <Dialog open={!!selectedClaim} onOpenChange={() => { setSelectedClaim(null); setReviewComments(""); }}>

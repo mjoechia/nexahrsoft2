@@ -8201,6 +8201,189 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
+  // Admin: Create a claim on behalf of an employee
+  app.post("/api/admin/claims/create-for-employee", requireAdmin, requireFullAdmin, upload.fields([{ name: "files", maxCount: 5 }, { name: "receipt", maxCount: 1 }]), async (req: Request, res: Response) => {
+    try {
+      const { targetUserId, claimType } = req.body;
+      if (!targetUserId) return res.status(400).json({ message: "targetUserId is required." });
+
+      const employee = await storage.getUser(targetUserId);
+      if (!employee) return res.status(404).json({ message: "Employee not found." });
+
+      const uploadedFiles = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
+
+      // ── OT Timesheet ──────────────────────────────────────────────────────
+      if (claimType === 'ot_timesheet') {
+        const claimMonth = parseInt(req.body.claimMonth);
+        const claimYear  = parseInt(req.body.claimYear);
+
+        if (!claimMonth || claimMonth < 1 || claimMonth > 12 || !claimYear || claimYear < 2020) {
+          return res.status(400).json({ message: "Invalid claim month or year." });
+        }
+
+        let rows: import("../shared/schema").TimesheetRow[];
+        try {
+          rows = JSON.parse(req.body.timesheetRows || "[]");
+          if (!Array.isArray(rows) || rows.length === 0 || rows.length > 31) throw new Error();
+        } catch {
+          return res.status(400).json({ message: "Invalid timesheet data." });
+        }
+
+        const timeRe = /^\d{2}:\d{2}$/;
+        for (const r of rows) {
+          const h1 = Number(r.hours1_5) || 0;
+          const h2 = Number(r.hours2)   || 0;
+          if (h1 < 0 || h2 < 0 || h1 > 24 || h2 > 24)
+            return res.status(400).json({ message: `Invalid OT hours on ${r.date}.` });
+          if (h1 > 0 || h2 > 0) {
+            if (!r.customerName?.trim()) return res.status(400).json({ message: `Customer name required for ${r.date}.` });
+            if (!r.projectNumber?.trim()) return res.status(400).json({ message: `Project number required for ${r.date}.` });
+          }
+          if (r.timeIn && !timeRe.test(r.timeIn)) return res.status(400).json({ message: `Time-In on ${r.date} must be HH:mm.` });
+          if (r.timeOut && !timeRe.test(r.timeOut)) return res.status(400).json({ message: `Time-Out on ${r.date} must be HH:mm.` });
+          if (r.timeIn && r.timeOut && r.timeOut <= r.timeIn) return res.status(400).json({ message: `Time-Out must be after Time-In on ${r.date}.` });
+        }
+
+        const totalHours1_5 = rows.reduce((s, r) => s + (Number(r.hours1_5) || 0), 0);
+        const totalHours2   = rows.reduce((s, r) => s + (Number(r.hours2)   || 0), 0);
+        if (totalHours1_5 === 0 && totalHours2 === 0)
+          return res.status(400).json({ message: "Please enter overtime hours for at least one day." });
+
+        const { claims: claimsTable } = await import("../shared/schema");
+        const existing = await db.select({ id: claimsTable.id }).from(claimsTable)
+          .where(and(eq(claimsTable.userId, targetUserId), eq(claimsTable.claimType, 'ot_timesheet'), eq(claimsTable.claimMonth, claimMonth), eq(claimsTable.claimYear, claimYear)))
+          .limit(1);
+        if (existing.length > 0) return res.status(400).json({ message: "An OT Timesheet for this month already exists for this employee." });
+
+        const hourlyRate = parseFloat(String(employee.hourlyRate || '0'));
+        const hourlyRateMissing = hourlyRate <= 0;
+        const totalOT = hourlyRateMissing ? 0 : parseFloat(((hourlyRate * 1.5 * totalHours1_5) + (hourlyRate * 2 * totalHours2)).toFixed(2));
+
+        const objectStorageService = new ObjectStorageService();
+        const otFileRecords: { url: string; name: string }[] = [];
+        if (uploadedFiles?.files) {
+          for (const f of uploadedFiles.files) {
+            const url = await objectStorageService.uploadPrivateFile(f.buffer, f.originalname, f.mimetype, `claims-ot/${targetUserId}`);
+            otFileRecords.push({ url, name: f.originalname });
+          }
+        }
+
+        const descParts: string[] = [];
+        if (hourlyRateMissing) descParts.push('⚠️ Hourly rate not set — please configure this employee\'s hourly rate and recalculate.');
+        if (req.body.notes) descParts.push(req.body.notes);
+
+        const monthStr = String(claimMonth).padStart(2, '0');
+        const claim = await storage.createClaim({
+          userId: targetUserId,
+          employeeCode: employee.employeeCode || null,
+          employeeName: employee.name || 'Unknown',
+          claimType: 'ot_timesheet',
+          amount: String(totalOT),
+          description: descParts.join(' ') || null,
+          receiptUrl: null, receiptFileName: null,
+          claimMonth, claimYear, status: 'pending',
+          workDate: `${claimYear}-${monthStr}-01`,
+          hours1_5: String(totalHours1_5), hours2: String(totalHours2),
+          calculatedAmount: hourlyRateMissing ? null : String(totalOT),
+          otFiles: otFileRecords.length > 0 ? JSON.stringify(otFileRecords) : null,
+          timesheetRows: JSON.stringify(rows),
+          totalHours1_5: String(totalHours1_5), totalHours2: String(totalHours2),
+        } as any);
+
+        res.json({ success: true, claim });
+        return;
+      }
+
+      // ── Single-day OT ─────────────────────────────────────────────────────
+      if (claimType === 'overtime') {
+        const workDate  = req.body.workDate;
+        const hours1_5  = parseFloat(req.body.hours1_5 || '0');
+        const hours2    = parseFloat(req.body.hours2 || '0');
+        const claimMonth = parseInt(req.body.claimMonth);
+        const claimYear  = parseInt(req.body.claimYear);
+
+        if (!workDate || !/^\d{4}-\d{2}-\d{2}$/.test(workDate)) return res.status(400).json({ message: "Valid workDate (YYYY-MM-DD) is required." });
+        if (hours1_5 < 0 || hours2 < 0 || hours1_5 + hours2 === 0) return res.status(400).json({ message: "Please enter valid overtime hours." });
+        if (hours1_5 + hours2 > 16) return res.status(400).json({ message: "Total overtime cannot exceed 16 hours per day." });
+
+        const { claims: claimsTable } = await import("../shared/schema");
+        const existing = await db.select({ id: claimsTable.id }).from(claimsTable)
+          .where(and(eq(claimsTable.userId, targetUserId), eq(claimsTable.claimType, 'overtime'), eq(claimsTable.workDate, workDate))).limit(1);
+        if (existing.length > 0) return res.status(400).json({ message: "OT claim already exists for this date for this employee." });
+
+        const hourlyRate = parseFloat(String(employee.hourlyRate || '0'));
+        const hourlyRateMissing = hourlyRate <= 0;
+        const totalOT = hourlyRateMissing ? 0 : parseFloat(((hourlyRate * 1.5 * hours1_5) + (hourlyRate * 2 * hours2)).toFixed(2));
+
+        const objectStorageService = new ObjectStorageService();
+        const otFileRecords: { url: string; name: string }[] = [];
+        if (uploadedFiles?.files) {
+          for (const f of uploadedFiles.files) {
+            const url = await objectStorageService.uploadPrivateFile(f.buffer, f.originalname, f.mimetype, `claims-ot/${targetUserId}`);
+            otFileRecords.push({ url, name: f.originalname });
+          }
+        }
+
+        const descParts: string[] = [];
+        if (hourlyRateMissing) descParts.push('⚠️ Hourly rate not set — please configure this employee\'s hourly rate.');
+        if (req.body.notes) descParts.push(req.body.notes);
+
+        const claim = await storage.createClaim({
+          userId: targetUserId,
+          employeeCode: employee.employeeCode || null,
+          employeeName: employee.name || 'Unknown',
+          claimType: 'overtime',
+          amount: String(totalOT),
+          description: descParts.join(' ') || null,
+          receiptUrl: null, receiptFileName: null,
+          claimMonth, claimYear, status: 'pending',
+          workDate, hours1_5: String(hours1_5), hours2: String(hours2),
+          calculatedAmount: hourlyRateMissing ? null : String(totalOT),
+          otFiles: otFileRecords.length > 0 ? JSON.stringify(otFileRecords) : null,
+        });
+
+        res.json({ success: true, claim });
+        return;
+      }
+
+      // ── Non-OT ────────────────────────────────────────────────────────────
+      const validTypes = ["transport", "material_purchase", "other"];
+      if (!validTypes.includes(claimType)) return res.status(400).json({ message: "Invalid claim type." });
+
+      const amount = parseFloat(req.body.amount);
+      if (isNaN(amount) || amount <= 0) return res.status(400).json({ message: "Amount must be a positive number." });
+
+      const claimMonth = parseInt(req.body.claimMonth);
+      const claimYear  = parseInt(req.body.claimYear);
+      if (!claimMonth || claimMonth < 1 || claimMonth > 12 || !claimYear) return res.status(400).json({ message: "Invalid month or year." });
+
+      let receiptUrl: string | null = null;
+      let receiptFileName: string | null = null;
+      const singleReceipt = uploadedFiles?.receipt?.[0];
+      if (singleReceipt) {
+        const objectStorageService = new ObjectStorageService();
+        receiptUrl = await objectStorageService.uploadPrivateFile(singleReceipt.buffer, singleReceipt.originalname, singleReceipt.mimetype, `claims/${targetUserId}`);
+        receiptFileName = singleReceipt.originalname;
+      }
+
+      const claim = await storage.createClaim({
+        userId: targetUserId,
+        employeeCode: employee.employeeCode || null,
+        employeeName: employee.name || 'Unknown',
+        claimType,
+        amount: String(amount),
+        description: req.body.description || null,
+        receiptUrl, receiptFileName,
+        claimMonth, claimYear, status: 'pending',
+      });
+
+      res.json({ success: true, claim });
+    } catch (error) {
+      console.error("Admin create claim error:", error);
+      res.status(500).json({ message: "Failed to create claim" });
+    }
+  });
+
   // Get approved claims for payslip (accessible by admin or employee viewing own payslip)
   app.get("/api/payslip/claims", async (req: Request, res: Response) => {
     if (!req.session?.userId) {
