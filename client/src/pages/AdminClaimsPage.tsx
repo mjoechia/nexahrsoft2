@@ -782,7 +782,13 @@ export default function AdminClaimsPage() {
               </AlertDialogTitle>
               <AlertDialogDescription>
                 This action cannot be undone. This will permanently delete the claim
-                {claimToDelete && ` from ${toTitleCase(claimToDelete.employeeName)} for $${parseFloat(claimToDelete.amount).toFixed(2)}`}.
+                {claimToDelete && (() => {
+                  const isOTType = claimToDelete.claimType === "overtime" || claimToDelete.claimType === "ot_timesheet";
+                  const suffix = isOTType && parseFloat(claimToDelete.amount) === 0
+                    ? ` from ${toTitleCase(claimToDelete.employeeName)} (OT — rate not set)`
+                    : ` from ${toTitleCase(claimToDelete.employeeName)} for $${parseFloat(claimToDelete.amount).toFixed(2)}`;
+                  return suffix;
+                })()}.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <div className="py-4">
@@ -844,7 +850,13 @@ function ClaimRow({ claim, onView, onViewReceipt, actions }: ClaimRowProps) {
         <p className="text-xs text-muted-foreground">Submitted: {format(new Date(claim.submittedAt), "dd MMM yyyy")}</p>
       </div>
       <div className="flex items-center gap-2 shrink-0">
-        <p className="text-lg font-semibold">${parseFloat(claim.amount).toFixed(2)}</p>
+        {(isOT || isOTSheet) ? (
+          parseFloat(claim.amount) > 0
+            ? <p className="text-lg font-semibold">${parseFloat(claim.amount).toFixed(2)}</p>
+            : <p className="text-xs text-destructive whitespace-nowrap">⚠️ Rate not set</p>
+        ) : (
+          <p className="text-lg font-semibold">${parseFloat(claim.amount).toFixed(2)}</p>
+        )}
         {claim.receiptFileName && (
           <Button variant="ghost" size="icon" onClick={e => { e.stopPropagation(); onViewReceipt(); }} data-testid={`button-receipt-${claim.id}`}>
             <FileText className="h-4 w-4" />
