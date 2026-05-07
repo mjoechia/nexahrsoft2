@@ -170,6 +170,8 @@ export const attendanceAdjustments = appSchema.table("attendance_adjustments", {
   leaveType: text("leave_type"), // 'AL', 'MC', 'ML', 'CL', 'OIL' (only when adjustmentType is 'leave')
   regularHours: real("regular_hours"), // Regular work hours (default 9 for leave, or admin-specified for hours adjustment)
   otHours: real("ot_hours"), // Overtime hours (for 'hours' adjustmentType)
+  clockInTime: text("clock_in_time"),  // "HH:mm" — admin-specified clock-in (hours adjustmentType)
+  clockOutTime: text("clock_out_time"), // "HH:mm" — admin-specified clock-out (hours adjustmentType)
   notes: text("notes"), // Optional notes by admin
   createdBy: varchar("created_by").notNull().references(() => users.id), // Admin who created adjustment
   createdAt: timestamp("created_at").notNull().defaultNow(),

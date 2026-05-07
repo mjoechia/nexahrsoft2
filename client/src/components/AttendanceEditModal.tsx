@@ -30,6 +30,8 @@ interface AttendanceAdjustment {
   leaveType: string | null;
   regularHours: number | null;
   otHours: number | null;
+  clockInTime: string | null;
+  clockOutTime: string | null;
   notes: string | null;
   createdBy: string;
   createdAt: Date;
@@ -64,7 +66,19 @@ export function AttendanceEditModal({
   const [leaveType, setLeaveType] = useState<LeaveType>("AL");
   const [regularHours, setRegularHours] = useState<string>("9");
   const [otHours, setOtHours] = useState<string>("0");
+  const [clockInTime, setClockInTime] = useState<string>("");
+  const [clockOutTime, setClockOutTime] = useState<string>("");
+  const [hoursManuallyEdited, setHoursManuallyEdited] = useState(false);
   const [notes, setNotes] = useState<string>("");
+
+  const calcHoursFromTimes = (inTime: string, outTime: string): number | null => {
+    if (!inTime || !outTime) return null;
+    const [inH, inM] = inTime.split(":").map(Number);
+    const [outH, outM] = outTime.split(":").map(Number);
+    let mins = (outH * 60 + outM) - (inH * 60 + inM);
+    if (mins <= 0) mins += 24 * 60; // crosses midnight
+    return Math.round((mins / 60) * 2) / 2; // round to nearest 0.5
+  };
 
   useEffect(() => {
     if (existingAdjustment) {
@@ -76,12 +90,18 @@ export function AttendanceEditModal({
       }
       setRegularHours(existingAdjustment.regularHours?.toString() || "9");
       setOtHours(existingAdjustment.otHours?.toString() || "0");
+      setClockInTime(existingAdjustment.clockInTime || "");
+      setClockOutTime(existingAdjustment.clockOutTime || "");
+      setHoursManuallyEdited(false);
       setNotes(existingAdjustment.notes || "");
     } else {
       setAdjustmentType("leave");
       setLeaveType("AL");
       setRegularHours("9");
       setOtHours("0");
+      setClockInTime("");
+      setClockOutTime("");
+      setHoursManuallyEdited(false);
       setNotes("");
     }
   }, [existingAdjustment, open]);
@@ -95,6 +115,8 @@ export function AttendanceEditModal({
         leaveType: adjustmentType === "leave" ? leaveType : null,
         regularHours: adjustmentType === "hours" ? parseFloat(regularHours) || 0 : null,
         otHours: adjustmentType === "hours" ? parseFloat(otHours) || 0 : null,
+        clockInTime:  adjustmentType === "hours" && clockInTime  ? clockInTime  : null,
+        clockOutTime: adjustmentType === "hours" && clockOutTime ? clockOutTime : null,
         notes: notes.trim() || null,
       });
     },
@@ -215,36 +237,86 @@ export function AttendanceEditModal({
           )}
 
           {adjustmentType === "hours" && (
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="regularHours">Regular Hours</Label>
-                <Input
-                  id="regularHours"
-                  type="number"
-                  min="0"
-                  max="24"
-                  step="0.5"
-                  value={regularHours}
-                  onChange={(e) => setRegularHours(e.target.value)}
-                  data-testid="input-regular-hours"
-                />
+            <div className="space-y-4">
+              {/* Clock-in / Clock-out time inputs */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="clockInTime">Clock In Time</Label>
+                  <Input
+                    id="clockInTime"
+                    type="time"
+                    value={clockInTime}
+                    onChange={(e) => {
+                      setClockInTime(e.target.value);
+                      if (!hoursManuallyEdited) {
+                        const calculated = calcHoursFromTimes(e.target.value, clockOutTime);
+                        if (calculated !== null) setRegularHours(String(calculated));
+                      }
+                    }}
+                    data-testid="input-clock-in-time"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="clockOutTime">Clock Out Time</Label>
+                  <Input
+                    id="clockOutTime"
+                    type="time"
+                    value={clockOutTime}
+                    onChange={(e) => {
+                      setClockOutTime(e.target.value);
+                      if (!hoursManuallyEdited) {
+                        const calculated = calcHoursFromTimes(clockInTime, e.target.value);
+                        if (calculated !== null) setRegularHours(String(calculated));
+                      }
+                    }}
+                    data-testid="input-clock-out-time"
+                  />
+                </div>
+                {clockInTime && clockOutTime && (() => {
+                  const h = calcHoursFromTimes(clockInTime, clockOutTime);
+                  return h !== null ? (
+                    <p className="text-xs text-muted-foreground col-span-2">
+                      Duration: <strong>{h} hrs</strong> (auto-filled below — edit to override)
+                    </p>
+                  ) : null;
+                })()}
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="otHours">OT Hours</Label>
-                <Input
-                  id="otHours"
-                  type="number"
-                  min="0"
-                  max="24"
-                  step="0.5"
-                  value={otHours}
-                  onChange={(e) => setOtHours(e.target.value)}
-                  data-testid="input-ot-hours"
-                />
+
+              {/* Regular / OT hours */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="regularHours">Regular Hours</Label>
+                  <Input
+                    id="regularHours"
+                    type="number"
+                    min="0"
+                    max="24"
+                    step="0.5"
+                    value={regularHours}
+                    onChange={(e) => {
+                      setRegularHours(e.target.value);
+                      setHoursManuallyEdited(true);
+                    }}
+                    data-testid="input-regular-hours"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="otHours">OT Hours</Label>
+                  <Input
+                    id="otHours"
+                    type="number"
+                    min="0"
+                    max="24"
+                    step="0.5"
+                    value={otHours}
+                    onChange={(e) => setOtHours(e.target.value)}
+                    data-testid="input-ot-hours"
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground col-span-2">
+                  Overrides actual hours for payroll. Clock-in/out times are stored for reference.
+                </p>
               </div>
-              <p className="text-xs text-muted-foreground col-span-2">
-                Overrides actual hours for payroll. Use when actual data needs correction.
-              </p>
             </div>
           )}
 

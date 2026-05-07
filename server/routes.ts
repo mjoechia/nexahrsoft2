@@ -2574,6 +2574,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Admin: Create or update attendance adjustment (leave or hours override)
   app.post("/api/admin/attendance/adjustments", requireAdmin, requireWriteAccess, requireFullAdmin, async (req: Request, res: Response) => {
     try {
+      const timeRe = /^\d{2}:\d{2}$/;
       const schema = z.object({
         userId: z.string().uuid(),
         date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -2581,15 +2582,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         leaveType: z.enum(["AL", "MC", "ML", "CL", "OIL"]).optional().nullable(),
         regularHours: z.number().min(0).max(24).optional().nullable(),
         otHours: z.number().min(0).max(24).optional().nullable(),
+        clockInTime:  z.string().regex(timeRe, "clockInTime must be HH:mm").optional().nullable(),
+        clockOutTime: z.string().regex(timeRe, "clockOutTime must be HH:mm").optional().nullable(),
         notes: z.string().optional().nullable(),
       });
-      
+
       const parsed = schema.safeParse(req.body);
       if (!parsed.success) {
         return res.status(400).json({ message: "Invalid request", errors: parsed.error.errors });
       }
-      
-      const { userId, date, adjustmentType, leaveType, regularHours, otHours, notes } = parsed.data;
+
+      const { userId, date, adjustmentType, leaveType, regularHours, otHours, clockInTime, clockOutTime, notes } = parsed.data;
+
+      if ((clockInTime && !clockOutTime) || (!clockInTime && clockOutTime)) {
+        return res.status(400).json({ message: "Both clock-in and clock-out times must be provided together." });
+      }
       
       // Validate leave type is provided for leave adjustments
       if (adjustmentType === "leave" && !leaveType) {
@@ -2618,27 +2625,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Check if adjustment already exists for this user/date
       const existingAdjustment = await storage.getAttendanceAdjustment(userId, date);
       
+      const isHours = adjustmentType === "hours";
+      const adjustmentFields = {
+        adjustmentType,
+        leaveType: leaveType || null,
+        regularHours: adjustmentType === "leave" ? 9 : (regularHours || null),
+        otHours: isHours ? (otHours || null) : null,
+        clockInTime:  isHours ? (clockInTime  || null) : null,
+        clockOutTime: isHours ? (clockOutTime || null) : null,
+        notes: notes || null,
+      };
+
       if (existingAdjustment) {
-        // Update existing adjustment
         const updated = await storage.updateAttendanceAdjustment(existingAdjustment.id, {
-          adjustmentType,
-          leaveType: leaveType || null,
-          regularHours: adjustmentType === "leave" ? 9 : (regularHours || null),
-          otHours: adjustmentType === "hours" ? (otHours || null) : null,
-          notes: notes || null,
+          ...adjustmentFields,
           createdBy: creatorId,
         });
         res.json({ adjustment: updated, message: "Attendance adjustment updated" });
       } else {
-        // Create new adjustment
         const newAdjustment = await storage.createAttendanceAdjustment({
           userId,
           date,
-          adjustmentType,
-          leaveType: leaveType || null,
-          regularHours: adjustmentType === "leave" ? 9 : (regularHours || null),
-          otHours: adjustmentType === "hours" ? (otHours || null) : null,
-          notes: notes || null,
+          ...adjustmentFields,
           createdBy: creatorId,
         });
         res.json({ adjustment: newAdjustment, message: "Attendance adjustment created" });
