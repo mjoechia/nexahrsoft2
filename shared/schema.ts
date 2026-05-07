@@ -272,7 +272,7 @@ export type InsertDailyAttendanceSummary = z.infer<typeof insertDailyAttendanceS
 export type DailyAttendanceSummary = typeof dailyAttendanceSummary.$inferSelect;
 
 // Attendance adjustments schemas and types
-export const leaveTypes = ["AL", "MC", "ML", "CL", "OIL"] as const;
+export const leaveTypes = ["AL", "MC", "ML", "CL", "OIL", "HDL"] as const;
 export type LeaveType = typeof leaveTypes[number];
 
 export const leaveTypeLabels: Record<LeaveType, string> = {
@@ -281,6 +281,7 @@ export const leaveTypeLabels: Record<LeaveType, string> = {
   ML: "Maternity Leave",
   CL: "Childcare Leave",
   OIL: "Off in Lieu",
+  HDL: "Half Day Leave",
 };
 
 export const insertAttendanceAdjustmentSchema = createInsertSchema(attendanceAdjustments).omit({

@@ -12,14 +12,15 @@ import { apiRequest } from "@/lib/queryClient";
 import { Loader2, Calendar, Clock, Trash2 } from "lucide-react";
 
 const LEAVE_TYPES = [
-  { value: "AL", label: "Annual Leave" },
-  { value: "MC", label: "Medical Leave" },
-  { value: "ML", label: "Maternity Leave" },
-  { value: "CL", label: "Childcare Leave" },
+  { value: "AL",  label: "Annual Leave" },
+  { value: "MC",  label: "Medical Leave" },
+  { value: "ML",  label: "Maternity Leave" },
+  { value: "CL",  label: "Childcare Leave" },
   { value: "OIL", label: "Off in Lieu" },
+  { value: "HDL", label: "Half Day Leave" },
 ] as const;
 
-type LeaveType = "AL" | "MC" | "ML" | "CL" | "OIL";
+type LeaveType = "AL" | "MC" | "ML" | "CL" | "OIL" | "HDL";
 type AdjustmentType = "leave" | "hours";
 
 interface AttendanceAdjustment {
@@ -231,7 +232,7 @@ export function AttendanceEditModal({
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">
-                Leave counts as 9 regular hours for payroll calculation.
+                Leave counts as 9 regular hours for payroll (4.5 hrs for Half Day Leave).
               </p>
             </div>
           )}

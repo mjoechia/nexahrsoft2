@@ -2579,7 +2579,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         userId: z.string().uuid(),
         date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
         adjustmentType: z.enum(["leave", "hours"]),
-        leaveType: z.enum(["AL", "MC", "ML", "CL", "OIL"]).optional().nullable(),
+        leaveType: z.enum(["AL", "MC", "ML", "CL", "OIL", "HDL"]).optional().nullable(),
         regularHours: z.number().min(0).max(24).optional().nullable(),
         otHours: z.number().min(0).max(24).optional().nullable(),
         clockInTime:  z.string().regex(timeRe, "clockInTime must be HH:mm").optional().nullable(),
@@ -2626,10 +2626,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const existingAdjustment = await storage.getAttendanceAdjustment(userId, date);
       
       const isHours = adjustmentType === "hours";
+      const leaveHours = (lt: string | null | undefined) => lt === "HDL" ? 4.5 : 9;
       const adjustmentFields = {
         adjustmentType,
         leaveType: leaveType || null,
-        regularHours: adjustmentType === "leave" ? 9 : (regularHours || null),
+        regularHours: adjustmentType === "leave" ? leaveHours(leaveType) : (regularHours || null),
         otHours: isHours ? (otHours || null) : null,
         clockInTime:  isHours ? (clockInTime  || null) : null,
         clockOutTime: isHours ? (clockOutTime || null) : null,
@@ -4219,6 +4220,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           'MEDICAL LEAVE': 'ML', 'MEDICAL': 'ML', 'SICK LEAVE': 'ML',
           'COMPASSIONATE LEAVE': 'CL', 'COMPASSIONATE': 'CL',
           'OFF IN LIEU': 'OIL', 'OFF-IN-LIEU': 'OIL', 'TIME OFF IN LIEU': 'OIL',
+          'HALF DAY LEAVE': 'HDL', 'HALF DAY': 'HDL', 'HDL': 'HDL',
           'UNPAID LEAVE': 'UL', 'UNPAID': 'UL', 'NO PAY LEAVE': 'UL',
           'MATERNITY LEAVE': 'MTL', 'MATERNITY': 'MTL',
           'PATERNITY LEAVE': 'PL', 'PATERNITY': 'PL',

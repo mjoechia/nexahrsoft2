@@ -2397,6 +2397,10 @@ export default function AdminAttendancePage() {
                   <div className="w-4 h-4 rounded bg-cyan-600 dark:bg-cyan-500 flex items-center justify-center text-[8px] text-white font-bold">OIL</div>
                   <span>Off-in-Lieu</span>
                 </div>
+                <div className="flex items-center gap-1">
+                  <div className="w-4 h-4 rounded bg-amber-500 dark:bg-amber-400 flex items-center justify-center text-[8px] text-white font-bold">HDL</div>
+                  <span>Half Day</span>
+                </div>
               </div>
               
               {/* Action Buttons Row */}
@@ -2647,6 +2651,7 @@ export default function AdminAttendancePage() {
                                     case 'ML': return 'bg-fuchsia-500 dark:bg-fuchsia-400'; // Maternity Leave - Fuchsia
                                     case 'CL': return 'bg-violet-500 dark:bg-violet-400'; // Compassionate Leave - Violet
                                     case 'OIL': return 'bg-cyan-600 dark:bg-cyan-500'; // Off-in-Lieu - Cyan
+                                    case 'HDL': return 'bg-amber-500 dark:bg-amber-400'; // Half Day Leave - Amber
                                     default: return 'bg-purple-500 dark:bg-purple-400'; // Default purple
                                   }
                                 };
