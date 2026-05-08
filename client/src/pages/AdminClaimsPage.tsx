@@ -1087,16 +1087,31 @@ export default function AdminClaimsPage() {
                   </div>
                 )}
 
-                {/* Non-OT receipt */}
-                {!isOT && selectedClaim.receiptFileName && (
-                  <div>
-                    <Label className="text-muted-foreground text-xs">Receipt</Label>
-                    <Button variant="outline" className="w-full mt-1" onClick={() => handleViewReceipt(selectedClaim.id)} data-testid="button-view-receipt">
-                      <FileText className="h-4 w-4 mr-2" />
-                      {selectedClaim.receiptFileName}
-                      <ExternalLink className="h-4 w-4 ml-auto" />
-                    </Button>
-                  </div>
+                {/* Non-OT receipts — multiple files (otFiles) or legacy single receiptUrl */}
+                {!isOT && (
+                  otFiles.length > 0 ? (
+                    <div className="space-y-2">
+                      <Label className="text-muted-foreground text-xs">Receipt(s)</Label>
+                      {otFiles.map((f, idx) => (
+                        <Button key={idx} variant="outline" className="w-full mt-1 justify-start" asChild>
+                          <a href={f.url} target="_blank" rel="noreferrer">
+                            <FileText className="h-4 w-4 mr-2" />
+                            {f.name}
+                            <ExternalLink className="h-4 w-4 ml-auto" />
+                          </a>
+                        </Button>
+                      ))}
+                    </div>
+                  ) : selectedClaim.receiptFileName ? (
+                    <div>
+                      <Label className="text-muted-foreground text-xs">Receipt</Label>
+                      <Button variant="outline" className="w-full mt-1" onClick={() => handleViewReceipt(selectedClaim.id)} data-testid="button-view-receipt">
+                        <FileText className="h-4 w-4 mr-2" />
+                        {selectedClaim.receiptFileName}
+                        <ExternalLink className="h-4 w-4 ml-auto" />
+                      </Button>
+                    </div>
+                  ) : null
                 )}
 
                 <div className="flex items-center gap-2">

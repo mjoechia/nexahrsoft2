@@ -42,6 +42,7 @@ const DAY_NAMES   = ["SUN","MON","TUE","WED","THU","FRI","SAT"];
 const ALLOWED_FILE_TYPES = ".pdf,.jpg,.jpeg,.png";
 const MAX_FILE_SIZE_MB = 5;
 const MAX_OT_FILES = 5;
+const MAX_RECEIPT_FILES = 3;
 
 export default function ClaimsPage() {
   const [open, setOpen] = useState(false);
@@ -49,7 +50,7 @@ export default function ClaimsPage() {
   // Non-OT fields
   const [amount, setAmount] = useState("");
   const [description, setDescription] = useState("");
-  const [receiptFile, setReceiptFile] = useState<File | null>(null);
+  const [receiptFiles, setReceiptFiles] = useState<File[]>([]);
   // OT fields
   const [workDate, setWorkDate] = useState("");
   const [hours1_5, setHours1_5] = useState("");
@@ -113,7 +114,7 @@ export default function ClaimsPage() {
     setClaimType("");
     setAmount("");
     setDescription("");
-    setReceiptFile(null);
+    setReceiptFiles([]);
     setWorkDate("");
     setHours1_5("");
     setHours2("");
@@ -150,9 +151,7 @@ export default function ClaimsPage() {
       } else {
         formData.append("amount", amount);
         formData.append("description", description);
-        if (receiptFile) {
-          formData.append("receipt", receiptFile);
-        }
+        receiptFiles.forEach(f => formData.append("receipt", f));
       }
 
       const response = await fetch("/api/claims", {
@@ -186,15 +185,26 @@ export default function ClaimsPage() {
     },
   });
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      if (file.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
-        toast({ title: "File Too Large", description: `Maximum file size is ${MAX_FILE_SIZE_MB}MB`, variant: "destructive" });
-        return;
-      }
-      setReceiptFile(file);
+  const handleReceiptFilesChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selected = Array.from(e.target.files || []);
+    const remaining = MAX_RECEIPT_FILES - receiptFiles.length;
+    if (remaining <= 0) {
+      toast({ title: "Max 3 receipts allowed", variant: "destructive" });
+      return;
     }
+    const toAdd = selected.slice(0, remaining);
+    const oversized = toAdd.filter(f => f.size > MAX_FILE_SIZE_MB * 1024 * 1024);
+    if (oversized.length > 0) {
+      toast({ title: "File Too Large", description: `Each file must be under ${MAX_FILE_SIZE_MB}MB`, variant: "destructive" });
+      return;
+    }
+    const deduped = toAdd.filter(nf => !receiptFiles.some(ef => ef.name === nf.name && ef.size === nf.size));
+    setReceiptFiles(prev => [...prev, ...deduped]);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const removeReceiptFile = (idx: number) => {
+    setReceiptFiles(prev => prev.filter((_, i) => i !== idx));
   };
 
   const handleOtFilesChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -627,30 +637,17 @@ export default function ClaimsPage() {
                     </div>
 
                     <div className="space-y-2">
-                      <Label>Receipt (Optional)</Label>
+                      <Label>Receipt(s) (Optional, up to {MAX_RECEIPT_FILES} files)</Label>
                       <input
                         ref={fileInputRef}
                         type="file"
                         accept={ALLOWED_FILE_TYPES}
-                        onChange={handleFileChange}
+                        multiple
+                        onChange={handleReceiptFilesChange}
                         className="hidden"
                         data-testid="input-receipt-file"
                       />
-                      {receiptFile ? (
-                        <div className="flex items-center gap-2 p-3 bg-muted rounded-md">
-                          <FileText className="h-4 w-4" />
-                          <span className="text-sm flex-1 truncate">{receiptFile.name}</span>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => setReceiptFile(null)}
-                            data-testid="button-remove-receipt"
-                          >
-                            <X className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      ) : (
+                      {receiptFiles.length < MAX_RECEIPT_FILES && (
                         <Button
                           type="button"
                           variant="outline"
@@ -659,11 +656,27 @@ export default function ClaimsPage() {
                           data-testid="button-upload-receipt"
                         >
                           <Upload className="h-4 w-4 mr-2" />
-                          Upload Receipt
+                          Add Receipt ({receiptFiles.length}/{MAX_RECEIPT_FILES})
                         </Button>
                       )}
+                      {receiptFiles.map((f, idx) => (
+                        <div key={idx} className="flex items-center gap-2 p-2 bg-muted rounded-md text-sm">
+                          <FileText className="h-4 w-4 shrink-0" />
+                          <span className="flex-1 truncate">{f.name}</span>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6"
+                            onClick={() => removeReceiptFile(idx)}
+                            data-testid={`button-remove-receipt-${idx}`}
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ))}
                       <p className="text-xs text-muted-foreground">
-                        PDF, JPG, PNG — max {MAX_FILE_SIZE_MB}MB
+                        PDF, JPG, PNG — max {MAX_FILE_SIZE_MB}MB each
                       </p>
                     </div>
                   </>

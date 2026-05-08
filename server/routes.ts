@@ -7702,7 +7702,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   
   // Employee: Submit a new claim
   app.post("/api/claims", upload.fields([
-    { name: 'receipt', maxCount: 1 },
+    { name: 'receipt', maxCount: 3 },
     { name: 'files', maxCount: 5 },
   ]), async (req: Request, res: Response) => {
     if (!req.session?.userId || req.session.isAdmin) {
@@ -7955,20 +7955,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const { claimType, amount, description, claimMonth, claimYear } = validation.data;
 
-      // Upload receipt to object storage if provided
+      // Upload receipt(s) to object storage if provided
       let receiptUrl: string | null = null;
       let receiptFileName: string | null = null;
+      let otFileRecords: { url: string; name: string }[] = [];
 
-      const singleReceipt = uploadedFiles?.receipt?.[0];
-      if (singleReceipt) {
+      const receiptFiles = uploadedFiles?.receipt;
+      if (receiptFiles && receiptFiles.length > 0) {
         const objectStorageService = new ObjectStorageService();
-        receiptUrl = await objectStorageService.uploadPrivateFile(
-          singleReceipt.buffer,
-          singleReceipt.originalname,
-          singleReceipt.mimetype,
-          `claims/${userId}`
+        const timestamp = Date.now();
+        const uploaded = await Promise.all(
+          receiptFiles.map((f, i) =>
+            objectStorageService.uploadPrivateFile(
+              f.buffer,
+              `${timestamp}-${i}-${f.originalname}`,
+              f.mimetype,
+              `claims/${userId}`
+            )
+          )
         );
-        receiptFileName = singleReceipt.originalname;
+        receiptUrl = uploaded[0];
+        receiptFileName = receiptFiles[0].originalname;
+        otFileRecords = uploaded.map((url, i) => ({ url, name: receiptFiles[i].originalname }));
       }
 
       // Get employee details
@@ -7983,6 +7991,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         description: description || null,
         receiptUrl,
         receiptFileName,
+        otFiles: otFileRecords.length > 0 ? JSON.stringify(otFileRecords) : null,
         claimMonth: parseInt(claimMonth),
         claimYear: parseInt(claimYear),
         status: 'pending',
