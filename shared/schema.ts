@@ -382,6 +382,7 @@ export const leaveApplications = appSchema.table("leave_applications", {
   dayType: text("day_type").notNull().default("full"), // 'full', 'first_half', 'second_half'
   reason: text("reason").notNull(),
   status: text("status").notNull().default("pending"), // 'pending', 'approved', 'rejected', 'cancelled'
+  submissionTiming: text("submission_timing"), // 'pre_event' | 'post_event' | null — MC only
   // Medical Leave specific fields
   mcFileUrl: text("mc_file_url"), // URL to medical certificate file
   receiptFileUrl: text("receipt_file_url"), // URL to medical receipt/claim file
@@ -390,6 +391,7 @@ export const leaveApplications = appSchema.table("leave_applications", {
   reviewedBy: varchar("reviewed_by").references(() => users.id), // Admin who reviewed
   reviewedAt: timestamp("reviewed_at"), // When it was reviewed
   reviewComments: text("review_comments"), // Admin's comments
+  approvedDays: numeric("approved_days", { precision: 6, scale: 2 }), // Actual days deducted (set on approval; may differ from totalDays)
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

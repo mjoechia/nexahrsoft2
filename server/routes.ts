@@ -3866,6 +3866,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const schema = z.object({
         status: z.enum(["approved", "rejected"]),
         reviewComments: z.string().optional(),
+        approvedDays: z.number().min(0).optional(),
       });
 
       const data = schema.parse(req.body);
@@ -3876,8 +3877,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Leave application not found" });
       }
 
-      // If approved, update leave balance (increment taken field)
+      // Admin sets actual deducted days at approval time (may differ from totalDays)
+      let deductedDays = 0;
       if (data.status === "approved") {
+        if (data.approvedDays === undefined) {
+          return res.status(400).json({ message: "approvedDays is required when approving" });
+        }
+        deductedDays = data.approvedDays;
+
         const leaveYear = new Date(application.startDate).getFullYear();
         const balance = await storage.getLeaveBalance(
           application.userId,
@@ -3885,18 +3892,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           leaveYear
         );
 
-        if (balance) {
-          const currentTaken = parseFloat(balance.taken || '0');
-          const applicationDays = parseFloat(String(application.totalDays) || '0');
-          const newTaken = currentTaken + applicationDays;
-          const currentBalance = parseFloat(balance.balance || '0');
-          const newBalance = currentBalance - applicationDays;
-          
-          await storage.updateLeaveBalanceTaken(
-            balance.id,
-            String(newTaken),
-            String(newBalance)
-          );
+        if (balance && deductedDays > 0) {
+          const newTaken   = parseFloat(balance.taken   || '0') + deductedDays;
+          const newBalance = parseFloat(balance.balance || '0') - deductedDays;
+          // No floor — MC may go negative (clamped to 0 by monthly cron); other types only got here with sufficient balance at submit time
+          await storage.updateLeaveBalanceTaken(balance.id, String(newTaken), String(newBalance));
         }
       }
 
@@ -3905,6 +3905,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         reviewedBy: adminId,
         reviewedAt: new Date(),
         reviewComments: data.reviewComments || null,
+        approvedDays: data.status === "approved" ? String(deductedDays) : null,
       });
 
       res.json({ success: true, application: updated });
@@ -4677,25 +4678,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
         dayType: z.enum(["full", "first_half", "second_half"]).optional().default("full"),
         reason: z.string().min(1),
         mlClaimAmount: z.string().optional().nullable().transform(val => val ? parseFloat(val) : null),
+        submissionTiming: z.enum(["pre_event", "post_event"]).optional().nullable(),
       });
 
       const data = schema.parse(req.body);
       const userId = req.session.userId;
 
-      // Check if user has enough leave balance
-      const leaveYear = new Date(data.startDate).getFullYear();
-      const balance = await storage.getLeaveBalance(
-        userId,
-        data.leaveType,
-        leaveYear
-      );
-
-      if (balance) {
-        const remainingDays = parseFloat(balance.balance || '0');
-        if (data.totalDays > remainingDays) {
-          return res.status(400).json({ 
-            message: `Insufficient leave balance. You have ${remainingDays} days remaining.` 
-          });
+      // MC may go negative — admin decides actual approvedDays at review.
+      // All other types: block if insufficient balance.
+      if (data.leaveType !== "MC") {
+        const leaveYear = new Date(data.startDate).getFullYear();
+        const balance = await storage.getLeaveBalance(userId, data.leaveType, leaveYear);
+        if (balance) {
+          const remainingDays = parseFloat(balance.balance || '0');
+          if (data.totalDays > remainingDays) {
+            return res.status(400).json({
+              message: `Insufficient leave balance. You have ${remainingDays} days remaining.`
+            });
+          }
         }
       }
 
@@ -4743,12 +4743,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         dayType: data.dayType,
         reason: data.reason,
         status: "pending",
+        submissionTiming: data.submissionTiming ?? null,
         mcFileUrl,
         receiptFileUrl,
         mlClaimAmount: data.mlClaimAmount ? String(data.mlClaimAmount) : null,
         reviewedBy: null,
         reviewedAt: null,
         reviewComments: null,
+        approvedDays: null,
       });
 
       res.json({ success: true, application });

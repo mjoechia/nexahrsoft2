@@ -45,6 +45,7 @@ export default function LeavePage() {
   const [open, setOpen] = useState(false);
   const [mcFile, setMcFile] = useState<File | null>(null);
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
+  const [submissionTiming, setSubmissionTiming] = useState<"pre_event" | "post_event">("pre_event");
   const mcFileInputRef = useRef<HTMLInputElement>(null);
   const receiptFileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
@@ -70,7 +71,7 @@ export default function LeavePage() {
 
   const selectedLeaveType = form.watch("leaveType");
   const selectedDayType = form.watch("dayType");
-  const isMedicalLeave = selectedLeaveType === "ML";
+  const isMedicalLeave = selectedLeaveType === "MC";
 
   const submitMutation = useMutation({
     mutationFn: async (data: LeaveApplicationForm) => {
@@ -89,7 +90,10 @@ export default function LeavePage() {
       formData.append("dayType", data.dayType);
       formData.append("reason", data.reason);
       formData.append("totalDays", String(daysDiff));
-      
+
+      if (data.leaveType === "MC") {
+        formData.append("submissionTiming", submissionTiming);
+      }
       if (mcFile) {
         formData.append("mcFile", mcFile);
       }
@@ -120,6 +124,7 @@ export default function LeavePage() {
       form.reset();
       setMcFile(null);
       setReceiptFile(null);
+      setSubmissionTiming("pre_event");
     },
     onError: (error: Error) => {
       toast({
@@ -261,6 +266,27 @@ export default function LeavePage() {
               </div>
               {isMedicalLeave && (
                 <div className="space-y-3 p-3 rounded-md bg-muted/50">
+                  <div className="space-y-2">
+                    <Label>Submission Timing</Label>
+                    <RadioGroup
+                      value={submissionTiming}
+                      onValueChange={(v) => setSubmissionTiming(v as "pre_event" | "post_event")}
+                      className="flex gap-4"
+                    >
+                      <div className="flex items-center space-x-2">
+                        <RadioGroupItem value="pre_event" id="timing-pre" data-testid="radio-timing-pre" />
+                        <Label htmlFor="timing-pre" className="font-normal cursor-pointer text-sm">
+                          Planned (before the date)
+                        </Label>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <RadioGroupItem value="post_event" id="timing-post" data-testid="radio-timing-post" />
+                        <Label htmlFor="timing-post" className="font-normal cursor-pointer text-sm">
+                          Post-event (already happened)
+                        </Label>
+                      </div>
+                    </RadioGroup>
+                  </div>
                   <p className="text-sm font-medium">Medical Certificate (MC) Upload</p>
                   <div className="space-y-2">
                     <Label htmlFor="mc-file">MC Document</Label>

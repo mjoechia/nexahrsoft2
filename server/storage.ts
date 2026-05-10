@@ -1567,6 +1567,16 @@ export class PgStorage implements IStorage {
     return updated;
   }
 
+  // Clamp any negative MC balances to 0. Called by the monthly cron at the start of each month.
+  // Negative MC is allowed within a cycle (urgent sick leave beyond entitlement) but does not carry forward.
+  async clampNegativeMcBalances(): Promise<number> {
+    const result = await db.update(leaveBalances)
+      .set({ balance: '0', updatedAt: new Date() })
+      .where(and(eq(leaveBalances.leaveType, 'MC'), lt(leaveBalances.balance, '0')))
+      .returning({ id: leaveBalances.id });
+    return result.length;
+  }
+
   async createLeaveApplication(application: InsertLeaveApplication): Promise<LeaveApplication> {
     const [created] = await db.insert(leaveApplications)
       .values(application)

@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { toTitleCase } from "@/lib/utils";
@@ -87,6 +87,16 @@ export default function AdminLeavePage() {
   const [totalDays, setTotalDays] = useState("");
   const [selectedApplication, setSelectedApplication] = useState<LeaveApplication | null>(null);
   const [reviewComments, setReviewComments] = useState("");
+  const [approvedDays, setApprovedDays] = useState<string>("");
+
+  // Prefill approvedDays with the requested totalDays whenever the review modal opens
+  useEffect(() => {
+    if (selectedApplication) {
+      setApprovedDays(String(selectedApplication.totalDays));
+    } else {
+      setApprovedDays("");
+    }
+  }, [selectedApplication]);
   
   // Analytics state
   const [analyticsYear, setAnalyticsYear] = useState(new Date().getFullYear());
@@ -664,10 +674,11 @@ export default function AdminLeavePage() {
   });
 
   const reviewMutation = useMutation({
-    mutationFn: async ({ applicationId, status }: { applicationId: string; status: "approved" | "rejected" }) => {
+    mutationFn: async ({ applicationId, status, approvedDays }: { applicationId: string; status: "approved" | "rejected"; approvedDays?: number }) => {
       return apiRequest("PATCH", `/api/admin/leave/applications/${applicationId}`, {
         status,
         reviewComments: reviewComments || undefined,
+        approvedDays,
       });
     },
     onSuccess: () => {
@@ -704,7 +715,20 @@ export default function AdminLeavePage() {
 
   const handleReviewApplication = (status: "approved" | "rejected") => {
     if (!selectedApplication) return;
-    reviewMutation.mutate({ applicationId: selectedApplication.id, status });
+    if (status === "approved") {
+      const days = parseFloat(approvedDays);
+      if (Number.isNaN(days) || days < 0) {
+        toast({
+          title: "Invalid approved days",
+          description: "Enter a non-negative number for the days to deduct.",
+          variant: "destructive",
+        });
+        return;
+      }
+      reviewMutation.mutate({ applicationId: selectedApplication.id, status, approvedDays: days });
+    } else {
+      reviewMutation.mutate({ applicationId: selectedApplication.id, status });
+    }
   };
 
   const getUserName = (userId: string) => {
@@ -1058,9 +1082,14 @@ export default function AdminLeavePage() {
                         <div className="space-y-4">
                           <div className="flex items-start justify-between">
                             <div className="space-y-2 flex-1">
-                              <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-2 flex-wrap">
                                 <h3 className="font-medium">{getUserName(app.userId)}</h3>
                                 <Badge>{app.leaveType}</Badge>
+                                {app.leaveType === "MC" && app.submissionTiming && (
+                                  <Badge variant="outline">
+                                    {app.submissionTiming === "pre_event" ? "Planned" : "Post-event"}
+                                  </Badge>
+                                )}
                               </div>
                               <div className="grid grid-cols-2 gap-4 text-sm">
                                 <div>
@@ -1598,6 +1627,45 @@ export default function AdminLeavePage() {
                   <p className="text-sm text-muted-foreground">Reason</p>
                   <p className="text-sm">{selectedApplication.reason}</p>
                 </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="approved-days">Approved Leave Days (deducted from balance on approve)</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="approved-days"
+                    type="number"
+                    min="0"
+                    step="0.5"
+                    value={approvedDays}
+                    onChange={(e) => setApprovedDays(e.target.value)}
+                    className="flex-1"
+                    data-testid="input-approved-days"
+                  />
+                  <Button type="button" variant="outline" size="sm"
+                    onClick={() => setApprovedDays(String(selectedApplication.totalDays))}
+                    data-testid="button-approved-full"
+                  >
+                    Full
+                  </Button>
+                  <Button type="button" variant="outline" size="sm"
+                    onClick={() => setApprovedDays(String(parseFloat(String(selectedApplication.totalDays)) / 2))}
+                    data-testid="button-approved-half"
+                  >
+                    Half
+                  </Button>
+                  <Button type="button" variant="outline" size="sm"
+                    onClick={() => setApprovedDays("0")}
+                    data-testid="button-approved-none"
+                  >
+                    None
+                  </Button>
+                </div>
+                {parseFloat(approvedDays) > parseFloat(String(selectedApplication.totalDays)) && (
+                  <p className="text-xs text-amber-600">
+                    ⚠️ Exceeds requested ({selectedApplication.totalDays}) — allowed but unusual
+                  </p>
+                )}
               </div>
 
               <div className="space-y-2">
