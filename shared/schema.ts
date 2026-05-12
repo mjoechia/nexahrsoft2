@@ -1039,3 +1039,24 @@ export const employeeDeletionLogs = appSchema.table("employee_deletion_logs", {
 });
 
 export type EmployeeDeletionLog = typeof employeeDeletionLogs.$inferSelect;
+
+// ─── Announcements ─────────────────────────────────────────────────────────
+// Admin-posted messages shown to all users in a rotating carousel on the dashboard.
+export const announcements = appSchema.table("announcements", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  title: text("title").notNull(),
+  body: text("body").notNull(),
+  isActive: boolean("is_active").notNull().default(true),
+  createdBy: varchar("created_by").references(() => users.id),
+  createdByName: text("created_by_name"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertAnnouncementSchema = createInsertSchema(announcements).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type InsertAnnouncement = z.infer<typeof insertAnnouncementSchema>;
+export type Announcement = typeof announcements.$inferSelect;

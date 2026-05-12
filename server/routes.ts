@@ -8472,6 +8472,90 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ==================== ANNOUNCEMENTS ROUTES ====================
+
+  // Public (authenticated user or admin): active announcements for the dashboard carousel
+  app.get("/api/announcements", async (req: Request, res: Response) => {
+    if (!req.session?.userId) {
+      return res.status(401).json({ message: "Authentication required" });
+    }
+    try {
+      const list = await storage.getActiveAnnouncements();
+      res.json({ announcements: list });
+    } catch (error) {
+      console.error("Get announcements error:", error);
+      res.status(500).json({ message: "Failed to fetch announcements" });
+    }
+  });
+
+  // Admin: list all (including inactive) for the Tools page management table
+  app.get("/api/admin/announcements", requireAdmin, async (_req: Request, res: Response) => {
+    try {
+      const list = await storage.getAllAnnouncements();
+      res.json({ announcements: list });
+    } catch (error) {
+      console.error("Get all announcements error:", error);
+      res.status(500).json({ message: "Failed to fetch announcements" });
+    }
+  });
+
+  // Admin: create announcement
+  app.post("/api/admin/announcements", requireAdmin, requireWriteAccess, requireFullAdmin, async (req: Request, res: Response) => {
+    try {
+      const schema = z.object({
+        title: z.string().min(1).max(200),
+        body: z.string().min(1).max(2000),
+        isActive: z.boolean().optional().default(true),
+      });
+      const data = schema.parse(req.body);
+      const adminId = req.session.userId!;
+      const adminUser = await storage.getUser(adminId);
+
+      const created = await storage.createAnnouncement({
+        title: data.title,
+        body: data.body,
+        isActive: data.isActive,
+        createdBy: adminId,
+        createdByName: adminUser?.name || null,
+      });
+      res.json({ success: true, announcement: created });
+    } catch (error) {
+      console.error("Create announcement error:", error);
+      res.status(500).json({ message: "Failed to create announcement" });
+    }
+  });
+
+  // Admin: update announcement (title, body, or active flag)
+  app.patch("/api/admin/announcements/:id", requireAdmin, requireWriteAccess, requireFullAdmin, async (req: Request, res: Response) => {
+    try {
+      const schema = z.object({
+        title: z.string().min(1).max(200).optional(),
+        body: z.string().min(1).max(2000).optional(),
+        isActive: z.boolean().optional(),
+      });
+      const data = schema.parse(req.body);
+      const updated = await storage.updateAnnouncement(req.params.id, data);
+      if (!updated) {
+        return res.status(404).json({ message: "Announcement not found" });
+      }
+      res.json({ success: true, announcement: updated });
+    } catch (error) {
+      console.error("Update announcement error:", error);
+      res.status(500).json({ message: "Failed to update announcement" });
+    }
+  });
+
+  // Admin: delete announcement
+  app.delete("/api/admin/announcements/:id", requireAdmin, requireWriteAccess, requireFullAdmin, async (req: Request, res: Response) => {
+    try {
+      await storage.deleteAnnouncement(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Delete announcement error:", error);
+      res.status(500).json({ message: "Failed to delete announcement" });
+    }
+  });
+
   const httpServer = createServer(app);
 
   return httpServer;

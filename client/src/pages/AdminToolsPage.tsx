@@ -7,13 +7,15 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
-import { ArrowLeft, FileText, Download, Save, Loader2 } from "lucide-react";
+import { ArrowLeft, FileText, Download, Save, Loader2, Megaphone } from "lucide-react";
 import { useLocation } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { toTitleCase } from "@/lib/utils";
 import type { CompanySettings } from "@shared/schema";
 import html2pdf from "html2pdf.js";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { AnnouncementsManager } from "@/components/AnnouncementsManager";
 
 interface PayslipFormData {
   employeeName: string;
@@ -268,6 +270,19 @@ export default function AdminToolsPage() {
           </Button>
         </div>
 
+        <Tabs defaultValue="payslip" className="space-y-4">
+          <TabsList>
+            <TabsTrigger value="payslip" data-testid="tab-payslip">
+              <FileText className="h-4 w-4 mr-2" />
+              Payslip Generator
+            </TabsTrigger>
+            <TabsTrigger value="announcements" data-testid="tab-announcements">
+              <Megaphone className="h-4 w-4 mr-2" />
+              Announcements
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="payslip">
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -896,6 +911,12 @@ export default function AdminToolsPage() {
             </div>
           </CardContent>
         </Card>
+          </TabsContent>
+
+          <TabsContent value="announcements">
+            <AnnouncementsManager />
+          </TabsContent>
+        </Tabs>
       </div>
     </div>
   );
