@@ -106,24 +106,24 @@ function scheduleNextMonthlyPayrollRun(): void {
 }
 
 // ---------------------------------------------------------------------------
-// Monthly: clamp negative MC balances to 0 (1st at 00:05 SGT)
+// Monthly: clamp negative leave balances (all types) to 0 (1st at 00:05 SGT)
 // ---------------------------------------------------------------------------
-// Negative MC balances are allowed within a cycle (urgent sick leave beyond
-// entitlement) but do NOT carry forward. At the start of each month, any
-// negative MC balance is reset to 0 so the next cycle starts fresh.
+// Negatives accumulate from urgent MC beyond entitlement, legacy imported
+// data, or admin balance edits. At the start of each month, any negative
+// balance is reset to 0 so the next cycle starts fresh.
 // This does NOT add new entitlement — that remains a manual admin action.
 
-async function resetNegativeMcBalances(): Promise<void> {
+async function resetNegativeLeaveBalances(): Promise<void> {
   try {
-    const cleared = await storage.clampNegativeMcBalances();
+    const cleared = await storage.clampNegativeLeaveBalances();
     console.log(JSON.stringify({
-      job: "resetNegativeMcBalances",
+      job: "resetNegativeLeaveBalances",
       cleared,
       timestamp: new Date().toISOString(),
     }));
   } catch (error) {
     console.error(JSON.stringify({
-      job: "resetNegativeMcBalances",
+      job: "resetNegativeLeaveBalances",
       error: (error as Error).message,
       timestamp: new Date().toISOString(),
     }));
@@ -145,11 +145,11 @@ function scheduleNextMonthlyMcResetRun(): void {
 
   const delay = nextUTC.getTime() - Date.now();
   setTimeout(async () => {
-    await resetNegativeMcBalances();
+    await resetNegativeLeaveBalances();
     scheduleNextMonthlyMcResetRun();
   }, delay);
 
-  console.log(`[Cron] Next MC negative-balance reset scheduled: ${nextUTC.toISOString()} (= 00:05 SGT)`);
+  console.log(`[Cron] Next negative leave-balance reset scheduled: ${nextUTC.toISOString()} (= 00:05 SGT)`);
 }
 
 // ---------------------------------------------------------------------------
@@ -167,7 +167,7 @@ export async function startCronJobs(): Promise<void> {
   // Not run on startup to avoid conflicting with manual admin deletions/regenerations.
   scheduleNextMonthlyPayrollRun();
 
-  // --- Monthly: clamp negative MC balances to 0 ---
+  // --- Monthly: clamp negative leave balances (all types) to 0 ---
   // Runs on the 1st of each month at 00:05 SGT (before payroll, so payroll sees clean balances).
   scheduleNextMonthlyMcResetRun();
 }
