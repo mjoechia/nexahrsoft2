@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -10,17 +10,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { Loader2, Calendar, Clock, Trash2 } from "lucide-react";
+import type { LeaveTypeRow } from "@shared/schema";
 
-const LEAVE_TYPES = [
-  { value: "AL",  label: "Annual Leave" },
-  { value: "MC",  label: "Medical Leave" },
-  { value: "ML",  label: "Maternity Leave" },
-  { value: "CL",  label: "Childcare Leave" },
-  { value: "OIL", label: "Off in Lieu" },
-  { value: "HDL", label: "Half Day Leave" },
-] as const;
-
-type LeaveType = "AL" | "MC" | "ML" | "CL" | "OIL" | "HDL";
+type LeaveType = string;  // codes are dynamic — populated from /api/leave-types
 type AdjustmentType = "leave" | "hours";
 
 interface AttendanceAdjustment {
@@ -65,6 +57,12 @@ export function AttendanceEditModal({
 
   const [adjustmentType, setAdjustmentType] = useState<AdjustmentType>("leave");
   const [leaveType, setLeaveType] = useState<LeaveType>("AL");
+
+  // Active leave types for the dropdown
+  const { data: leaveTypesData } = useQuery<{ leaveTypes: LeaveTypeRow[] }>({
+    queryKey: ["/api/leave-types"],
+  });
+  const activeLeaveTypes = leaveTypesData?.leaveTypes || [];
   const [regularHours, setRegularHours] = useState<string>("9");
   const [otHours, setOtHours] = useState<string>("0");
   const [clockInTime, setClockInTime] = useState<string>("");
@@ -84,11 +82,8 @@ export function AttendanceEditModal({
   useEffect(() => {
     if (existingAdjustment) {
       setAdjustmentType((existingAdjustment.adjustmentType === "hours" ? "hours" : "leave") as AdjustmentType);
-      if (existingAdjustment.leaveType && LEAVE_TYPES.some(lt => lt.value === existingAdjustment.leaveType)) {
-        setLeaveType(existingAdjustment.leaveType as LeaveType);
-      } else {
-        setLeaveType("AL");
-      }
+      // Accept any historical leave type code — preserves existing rows even if the type was later archived
+      setLeaveType(existingAdjustment.leaveType || "AL");
       setRegularHours(existingAdjustment.regularHours?.toString() || "9");
       setOtHours(existingAdjustment.otHours?.toString() || "0");
       setClockInTime(existingAdjustment.clockInTime || "");
@@ -224,9 +219,9 @@ export function AttendanceEditModal({
                   <SelectValue placeholder="Select leave type" />
                 </SelectTrigger>
                 <SelectContent>
-                  {LEAVE_TYPES.map((lt) => (
-                    <SelectItem key={lt.value} value={lt.value}>
-                      {lt.label} ({lt.value})
+                  {activeLeaveTypes.map((lt) => (
+                    <SelectItem key={lt.code} value={lt.code}>
+                      {lt.label} ({lt.code})
                     </SelectItem>
                   ))}
                 </SelectContent>

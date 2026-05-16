@@ -8556,6 +8556,200 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ==================== LEAVE TYPES + ACCRUAL ROUTES ====================
+
+  const codeRegex = /^[A-Z0-9_]{2,10}$/;
+
+  // Public (any authenticated user): active leave types for employee dropdowns
+  app.get("/api/leave-types", async (req: Request, res: Response) => {
+    if (!req.session?.userId) {
+      return res.status(401).json({ message: "Authentication required" });
+    }
+    try {
+      const types = await storage.getActiveLeaveTypes();
+      res.json({ leaveTypes: types });
+    } catch (error) {
+      console.error("Get leave types error:", error);
+      res.status(500).json({ message: "Failed to fetch leave types" });
+    }
+  });
+
+  // Admin: list ALL types (active + inactive)
+  app.get("/api/admin/leave-types", requireAdmin, async (_req: Request, res: Response) => {
+    try {
+      const types = await storage.getAllLeaveTypes();
+      res.json({ leaveTypes: types });
+    } catch (error) {
+      console.error("Admin get leave types error:", error);
+      res.status(500).json({ message: "Failed to fetch leave types" });
+    }
+  });
+
+  // Admin: create a leave type
+  app.post("/api/admin/leave-types", requireAdmin, requireWriteAccess, requireFullAdmin, async (req: Request, res: Response) => {
+    try {
+      const schema = z.object({
+        code: z.string().regex(codeRegex, "Code: 2-10 chars, A-Z, 0-9, _ only"),
+        label: z.string().min(1).max(100),
+        isActive: z.boolean().optional().default(true),
+        initialBalance: z.number().min(0),
+        monthlyAccrual: z.number().min(0),
+        accrualStrategy: z.enum(["flat", "tenure_al"]).default("flat"),
+        sortOrder: z.number().int().optional().default(0),
+      });
+      const data = schema.parse(req.body);
+      const created = await storage.createLeaveType({
+        code: data.code,
+        label: data.label,
+        isActive: data.isActive,
+        initialBalance: String(data.initialBalance),
+        monthlyAccrual: String(data.monthlyAccrual),
+        accrualStrategy: data.accrualStrategy,
+        sortOrder: data.sortOrder,
+      });
+      res.json({ success: true, leaveType: created });
+    } catch (error) {
+      console.error("Create leave type error:", error);
+      const msg = (error as Error).message || "";
+      if (msg.includes("duplicate key")) {
+        return res.status(409).json({ message: "Leave type with this code already exists" });
+      }
+      res.status(500).json({ message: "Failed to create leave type" });
+    }
+  });
+
+  // Admin: update a leave type — code is IMMUTABLE
+  app.patch("/api/admin/leave-types/:id", requireAdmin, requireWriteAccess, requireFullAdmin, async (req: Request, res: Response) => {
+    try {
+      if ("code" in req.body) {
+        return res.status(400).json({ message: "code is immutable; create a new type if you need a different code" });
+      }
+      const schema = z.object({
+        label: z.string().min(1).max(100).optional(),
+        isActive: z.boolean().optional(),
+        initialBalance: z.number().min(0).optional(),
+        monthlyAccrual: z.number().min(0).optional(),
+        accrualStrategy: z.enum(["flat", "tenure_al"]).optional(),
+        sortOrder: z.number().int().optional(),
+      });
+      const data = schema.parse(req.body);
+      const updates: any = { ...data };
+      if (data.initialBalance !== undefined) updates.initialBalance = String(data.initialBalance);
+      if (data.monthlyAccrual !== undefined) updates.monthlyAccrual = String(data.monthlyAccrual);
+      const updated = await storage.updateLeaveType(req.params.id, updates);
+      if (!updated) return res.status(404).json({ message: "Leave type not found" });
+      res.json({ success: true, leaveType: updated });
+    } catch (error) {
+      console.error("Update leave type error:", error);
+      res.status(500).json({ message: "Failed to update leave type" });
+    }
+  });
+
+  // Admin: list per-employee accrual overrides
+  app.get("/api/admin/leave-overrides", requireAdmin, async (_req: Request, res: Response) => {
+    try {
+      const overrides = await storage.getAllOverrides();
+      res.json({ overrides });
+    } catch (error) {
+      console.error("Get overrides error:", error);
+      res.status(500).json({ message: "Failed to fetch overrides" });
+    }
+  });
+
+  // Admin: create an override
+  app.post("/api/admin/leave-overrides", requireAdmin, requireWriteAccess, requireFullAdmin, async (req: Request, res: Response) => {
+    try {
+      const schema = z.object({
+        userId: z.string().min(1),
+        leaveTypeCode: z.string().regex(codeRegex),
+        extraMonthlyAccrual: z.number(),
+        notes: z.string().optional().nullable(),
+      });
+      const data = schema.parse(req.body);
+      const created = await storage.createOverride({
+        userId: data.userId,
+        leaveTypeCode: data.leaveTypeCode,
+        extraMonthlyAccrual: String(data.extraMonthlyAccrual),
+        notes: data.notes ?? null,
+        createdBy: req.session.userId!,
+      });
+      res.json({ success: true, override: created });
+    } catch (error) {
+      console.error("Create override error:", error);
+      const msg = (error as Error).message || "";
+      if (msg.includes("duplicate key")) {
+        return res.status(409).json({ message: "An override already exists for this user and leave type" });
+      }
+      res.status(500).json({ message: "Failed to create override" });
+    }
+  });
+
+  app.patch("/api/admin/leave-overrides/:id", requireAdmin, requireWriteAccess, requireFullAdmin, async (req: Request, res: Response) => {
+    try {
+      const schema = z.object({
+        extraMonthlyAccrual: z.number().optional(),
+        notes: z.string().optional().nullable(),
+      });
+      const data = schema.parse(req.body);
+      const updates: any = {};
+      if (data.extraMonthlyAccrual !== undefined) updates.extraMonthlyAccrual = String(data.extraMonthlyAccrual);
+      if (data.notes !== undefined) updates.notes = data.notes;
+      const updated = await storage.updateOverride(req.params.id, updates);
+      if (!updated) return res.status(404).json({ message: "Override not found" });
+      res.json({ success: true, override: updated });
+    } catch (error) {
+      console.error("Update override error:", error);
+      res.status(500).json({ message: "Failed to update override" });
+    }
+  });
+
+  app.delete("/api/admin/leave-overrides/:id", requireAdmin, requireWriteAccess, requireFullAdmin, async (req: Request, res: Response) => {
+    try {
+      await storage.deleteOverride(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Delete override error:", error);
+      res.status(500).json({ message: "Failed to delete override" });
+    }
+  });
+
+  // Admin: read accrual run history
+  app.get("/api/admin/accrual-runs", requireAdmin, async (_req: Request, res: Response) => {
+    try {
+      const runs = await storage.getRecentAccrualRuns(12);
+      res.json({ runs });
+    } catch (error) {
+      console.error("Get accrual runs error:", error);
+      res.status(500).json({ message: "Failed to fetch accrual runs" });
+    }
+  });
+
+  // Admin: trigger accrual now (idempotent — no-op if already run for current SGT month)
+  app.post("/api/admin/accrual-runs/trigger", requireAdmin, requireWriteAccess, requireFullAdmin, async (req: Request, res: Response) => {
+    try {
+      const sgNow = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Singapore" }));
+      const year = sgNow.getFullYear();
+      const month = sgNow.getMonth() + 1;
+      const adminId = req.session.userId!;
+      const run = await storage.startAccrualRun(year, month, `manual:${adminId}`);
+      if (!run) {
+        return res.json({ success: true, skipped: true, reason: "Already accrued this month" });
+      }
+      try {
+        const touched = await storage.runMonthlyLeaveAccrual(year, run.id, sgNow);
+        const cleared = await storage.clampNegativeLeaveBalances();
+        await storage.completeAccrualRun(run.id, touched);
+        res.json({ success: true, year, month, rowsTouched: touched, negativesCleared: cleared });
+      } catch (innerErr) {
+        await storage.failAccrualRun(run.id, (innerErr as Error).message);
+        throw innerErr;
+      }
+    } catch (error) {
+      console.error("Trigger accrual error:", error);
+      res.status(500).json({ message: "Failed to run accrual: " + (error as Error).message });
+    }
+  });
+
   const httpServer = createServer(app);
 
   return httpServer;

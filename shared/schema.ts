@@ -1060,3 +1060,75 @@ export const insertAnnouncementSchema = createInsertSchema(announcements).omit({
 });
 export type InsertAnnouncement = z.infer<typeof insertAnnouncementSchema>;
 export type Announcement = typeof announcements.$inferSelect;
+
+// ─── Leave Types (admin-managed, replaces hardcoded leaveTypes constant) ────
+export const leaveTypesTable = appSchema.table("leave_types", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  code: text("code").notNull().unique(),                              // immutable after creation
+  label: text("label").notNull(),                                     // freely editable
+  isActive: boolean("is_active").notNull().default(true),
+  initialBalance: numeric("initial_balance", { precision: 6, scale: 2 }).notNull().default("0"),
+  monthlyAccrual: numeric("monthly_accrual", { precision: 6, scale: 2 }).notNull().default("0"),
+  accrualStrategy: text("accrual_strategy").notNull().default("flat"), // 'flat' | 'tenure_al'
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertLeaveTypeSchema = createInsertSchema(leaveTypesTable).omit({
+  id: true, createdAt: true, updatedAt: true,
+});
+export type InsertLeaveType = z.infer<typeof insertLeaveTypeSchema>;
+export type LeaveTypeRow = typeof leaveTypesTable.$inferSelect;
+
+// ─── Per-employee accrual overrides (additive bonus on top of type's base) ──
+export const employeeLeaveAccrualOverrides = appSchema.table("employee_leave_accrual_overrides", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  leaveTypeCode: text("leave_type_code").notNull(),
+  extraMonthlyAccrual: numeric("extra_monthly_accrual", { precision: 6, scale: 2 }).notNull(),
+  notes: text("notes"),
+  createdBy: varchar("created_by").references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => ({
+  uniqUserType: unique().on(t.userId, t.leaveTypeCode),
+}));
+
+export const insertEmployeeLeaveAccrualOverrideSchema = createInsertSchema(employeeLeaveAccrualOverrides).omit({
+  id: true, createdAt: true, updatedAt: true,
+});
+export type InsertEmployeeLeaveAccrualOverride = z.infer<typeof insertEmployeeLeaveAccrualOverrideSchema>;
+export type EmployeeLeaveAccrualOverride = typeof employeeLeaveAccrualOverrides.$inferSelect;
+
+// ─── Monthly accrual run ledger (idempotency guard for the cron) ────────────
+export const leaveAccrualRuns = appSchema.table("leave_accrual_runs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  year: integer("year").notNull(),
+  month: integer("month").notNull(),                                  // 1-12
+  rowsTouched: integer("rows_touched").notNull().default(0),
+  startedAt: timestamp("started_at").notNull().defaultNow(),
+  completedAt: timestamp("completed_at"),
+  triggeredBy: text("triggered_by").notNull(),                        // 'cron' | 'manual:<adminId>'
+  status: text("status").notNull().default("running"),                // 'running' | 'completed' | 'failed'
+  errorMessage: text("error_message"),
+}, (t) => ({
+  uniqYearMonth: unique().on(t.year, t.month),
+}));
+
+export type LeaveAccrualRun = typeof leaveAccrualRuns.$inferSelect;
+
+// ─── Leave balance transaction ledger (audit trail for every balance delta) ─
+export const leaveBalanceTransactions = appSchema.table("leave_balance_transactions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  leaveTypeCode: text("leave_type_code").notNull(),
+  year: integer("year").notNull(),
+  delta: numeric("delta", { precision: 6, scale: 2 }).notNull(),      // signed
+  source: text("source").notNull(),                                   // 'monthly_accrual' | 'override_accrual' | 'application_approved' | 'admin_adjustment' | 'monthly_clamp' | 'initial_seed'
+  sourceRefId: varchar("source_ref_id"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export type LeaveBalanceTransaction = typeof leaveBalanceTransactions.$inferSelect;

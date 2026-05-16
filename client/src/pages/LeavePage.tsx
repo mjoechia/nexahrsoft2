@@ -24,7 +24,7 @@ import {
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import type { LeaveBalance, LeaveApplication } from "@shared/schema";
+import type { LeaveBalance, LeaveApplication, LeaveTypeRow } from "@shared/schema";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { useForm } from "react-hook-form";
@@ -57,6 +57,12 @@ export default function LeavePage() {
   const { data: applicationsData, isLoading: applicationsLoading } = useQuery<{ applications: LeaveApplication[] }>({
     queryKey: ["/api/leave/applications"],
   });
+
+  const { data: leaveTypesData } = useQuery<{ leaveTypes: LeaveTypeRow[] }>({
+    queryKey: ["/api/leave-types"],
+  });
+  const activeTypeCodes = new Set((leaveTypesData?.leaveTypes || []).map(t => t.code));
+  const typeLabelByCode = new Map((leaveTypesData?.leaveTypes || []).map(t => [t.code, t.label]));
 
   const form = useForm<LeaveApplicationForm>({
     resolver: zodResolver(leaveApplicationSchema),
@@ -208,11 +214,16 @@ export default function LeavePage() {
                     <SelectValue placeholder="Select leave type" />
                   </SelectTrigger>
                   <SelectContent>
-                    {balances.map((balance) => (
-                      <SelectItem key={balance.id} value={balance.leaveType}>
-                        {balance.leaveType} ({balance.balance} days left)
-                      </SelectItem>
-                    ))}
+                    {balances
+                      .filter((b) => activeTypeCodes.has(b.leaveType))
+                      .map((balance) => {
+                        const label = typeLabelByCode.get(balance.leaveType) || balance.leaveType;
+                        return (
+                          <SelectItem key={balance.id} value={balance.leaveType}>
+                            {label} ({balance.balance} days left)
+                          </SelectItem>
+                        );
+                      })}
                   </SelectContent>
                 </Select>
                 {form.formState.errors.leaveType && (

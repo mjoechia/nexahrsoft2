@@ -106,24 +106,50 @@ function scheduleNextMonthlyPayrollRun(): void {
 }
 
 // ---------------------------------------------------------------------------
-// Monthly: clamp negative leave balances (all types) to 0 (1st at 00:05 SGT)
+// Monthly: accrue then clamp (1st at 00:05 SGT) — idempotent via leave_accrual_runs
 // ---------------------------------------------------------------------------
-// Negatives accumulate from urgent MC beyond entitlement, legacy imported
-// data, or admin balance edits. At the start of each month, any negative
-// balance is reset to 0 so the next cycle starts fresh.
-// This does NOT add new entitlement — that remains a manual admin action.
+// 1. Accrue: add base monthly + per-employee override to each (user × active type)
+// 2. Clamp: any remaining negatives are set to 0 so the next cycle starts fresh
+// The leave_accrual_runs table prevents double-application within the same month
+// even if the server restarts or someone triggers manually.
 
-async function resetNegativeLeaveBalances(): Promise<void> {
+async function monthlyLeaveJob(triggeredBy: string): Promise<void> {
   try {
-    const cleared = await storage.clampNegativeLeaveBalances();
-    console.log(JSON.stringify({
-      job: "resetNegativeLeaveBalances",
-      cleared,
-      timestamp: new Date().toISOString(),
-    }));
+    const sgNow = getSingaporeNow();
+    const year = sgNow.getFullYear();
+    const month = sgNow.getMonth() + 1;
+
+    const run = await storage.startAccrualRun(year, month, triggeredBy);
+    if (!run) {
+      console.log(JSON.stringify({
+        job: "monthlyLeaveJob",
+        skipped: true,
+        reason: "already accrued",
+        year, month,
+        timestamp: new Date().toISOString(),
+      }));
+      return;
+    }
+
+    try {
+      const touched = await storage.runMonthlyLeaveAccrual(year, run.id, sgNow);
+      const cleared = await storage.clampNegativeLeaveBalances();
+      await storage.completeAccrualRun(run.id, touched);
+      console.log(JSON.stringify({
+        job: "monthlyLeaveJob",
+        triggeredBy,
+        year, month,
+        rowsTouched: touched,
+        negativesCleared: cleared,
+        timestamp: new Date().toISOString(),
+      }));
+    } catch (innerErr) {
+      await storage.failAccrualRun(run.id, (innerErr as Error).message);
+      throw innerErr;
+    }
   } catch (error) {
     console.error(JSON.stringify({
-      job: "resetNegativeLeaveBalances",
+      job: "monthlyLeaveJob",
       error: (error as Error).message,
       timestamp: new Date().toISOString(),
     }));
@@ -145,11 +171,11 @@ function scheduleNextMonthlyMcResetRun(): void {
 
   const delay = nextUTC.getTime() - Date.now();
   setTimeout(async () => {
-    await resetNegativeLeaveBalances();
+    await monthlyLeaveJob("cron");
     scheduleNextMonthlyMcResetRun();
   }, delay);
 
-  console.log(`[Cron] Next negative leave-balance reset scheduled: ${nextUTC.toISOString()} (= 00:05 SGT)`);
+  console.log(`[Cron] Next monthly leave job scheduled: ${nextUTC.toISOString()} (= 00:05 SGT)`);
 }
 
 // ---------------------------------------------------------------------------
@@ -167,7 +193,8 @@ export async function startCronJobs(): Promise<void> {
   // Not run on startup to avoid conflicting with manual admin deletions/regenerations.
   scheduleNextMonthlyPayrollRun();
 
-  // --- Monthly: clamp negative leave balances (all types) to 0 ---
+  // --- Monthly: accrue leave for all active types, then clamp negatives ---
   // Runs on the 1st of each month at 00:05 SGT (before payroll, so payroll sees clean balances).
+  // Idempotent via leave_accrual_runs table — safe against double-trigger.
   scheduleNextMonthlyMcResetRun();
 }

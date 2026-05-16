@@ -6,7 +6,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { Calendar, ArrowLeft, Plus, CheckCircle, XCircle, Upload, BarChart3, PieChart as PieChartIcon, Download, Users, TrendingUp, FileText, AlertTriangle, Printer, Settings, History, Pencil, Trash2, Eye, ChevronDown, ChevronUp } from "lucide-react";
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import { Link } from "wouter";
-import type { User, LeaveBalance, LeaveApplication, LeaveHistory } from "@shared/schema";
+import type { User, LeaveBalance, LeaveApplication, LeaveHistory, LeaveTypeRow } from "@shared/schema";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -173,6 +173,12 @@ export default function AdminLeavePage() {
   });
   
   const historyRecords = historyData?.records || [];
+
+  // Active leave types for the Set Balance dropdown
+  const { data: leaveTypesData } = useQuery<{ leaveTypes: LeaveTypeRow[] }>({
+    queryKey: ['/api/leave-types'],
+  });
+  const leaveTypeOptions = leaveTypesData?.leaveTypes || [];
 
   // Import leave history mutation
   const importMutation = useMutation({
@@ -940,13 +946,18 @@ export default function AdminLeavePage() {
 
                     <div className="space-y-2">
                       <Label htmlFor="leave-type">Leave Type</Label>
-                      <Input
-                        id="leave-type"
-                        placeholder="e.g., Annual Leave, Sick Leave"
-                        value={leaveType}
-                        onChange={(e) => setLeaveType(e.target.value)}
-                        data-testid="input-leave-type"
-                      />
+                      <Select value={leaveType} onValueChange={setLeaveType}>
+                        <SelectTrigger id="leave-type" data-testid="select-leave-type">
+                          <SelectValue placeholder="Select leave type" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {leaveTypeOptions.map((lt) => (
+                            <SelectItem key={lt.id} value={lt.code}>
+                              {lt.label} ({lt.code})
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
 
                     <div className="space-y-2">
