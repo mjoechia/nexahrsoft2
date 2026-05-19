@@ -2827,7 +2827,10 @@ export class PgStorage implements IStorage {
       .limit(1);
 
     const currentBalance = existing ? parseFloat(existing.balance || "0") : 0;
-    const cap = config?.maxBalance != null ? parseFloat(config.maxBalance) : null;
+    // Cap = maxBalance if set, else annualAllowance (UI consolidated the two fields). Null = uncapped.
+    const cap = config?.maxBalance != null
+      ? parseFloat(config.maxBalance)
+      : (config?.annualAllowance != null ? parseFloat(config.annualAllowance) : null);
 
     // Apply cap
     let delta = proposedIncrement;

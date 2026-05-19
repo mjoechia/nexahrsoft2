@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { toTitleCase } from "@/lib/utils";
@@ -101,7 +101,10 @@ export default function AdminLeavePage() {
   // Filtered list for selects / snapshot rows (excludes admins, archived, unapproved).
   // For NAME LOOKUPS use `allUsers` instead so applicants are never shown as "Unknown".
   const users = allUsers.filter(u => u.isApproved && !u.isArchived && !u.role?.includes("admin"));
-  const balances = balancesData?.balances || [];
+  // Stable references — otherwise useEffect dependency comparison sees a fresh empty array
+  // every render while the query is loading, re-firing the prefill effect on every keystroke
+  // and wiping the user's input.
+  const balances = useMemo(() => balancesData?.balances || [], [balancesData]);
   const applications = applicationsData?.applications || [];
   const leaveTypeOptions = leaveTypesData?.leaveTypes || [];
 
@@ -124,7 +127,8 @@ export default function AdminLeavePage() {
         leaveTypeCode: leaveType,
         monthlyIncrement: cfgMonthlyIncrement === "" ? null : (parseFloat(cfgMonthlyIncrement) || 0),
         annualAllowance:  cfgAnnualAllowance  === "" ? null : (parseFloat(cfgAnnualAllowance)  || 0),
-        maxBalance:       cfgMaxBalance       === "" ? null : (parseFloat(cfgMaxBalance)       || 0),
+        // Max Balance = Annual Allowance (UI consolidated; same value drives both the reset and the cap)
+        maxBalance:       cfgAnnualAllowance  === "" ? null : (parseFloat(cfgAnnualAllowance)  || 0),
         notes:            "Edited via Team Snapshot Adjust",
       });
       const [balRes, cfgRes] = await Promise.allSettled([balPromise, cfgPromise]);
@@ -429,20 +433,29 @@ export default function AdminLeavePage() {
     queryKey: ["/api/admin/users", selectedUserId, "leave-configs"],
     enabled: !!selectedUserId,
   });
-  const userConfigs = userConfigsData?.configs || [];
+  const userConfigs = useMemo(() => userConfigsData?.configs || [], [userConfigsData]);
 
-  // Prefill 3 config fields from the cached configs array whenever (userConfigs, leaveType) changes.
-  // Local derivation — no per-type fetch, so rapid type-switching is race-free.
+  // Prefill 2 config fields when (userConfigs, leaveType) changes.
+  // Priority: per-user config > type-level default (so admin always sees what's currently active).
   useEffect(() => {
     if (!selectedUserId || !leaveType) {
       setCfgMonthlyIncrement(""); setCfgAnnualAllowance(""); setCfgMaxBalance("");
       return;
     }
     const cfg = userConfigs.find(c => c.leaveTypeCode === leaveType);
-    setCfgMonthlyIncrement(cfg?.monthlyIncrement ?? "");
-    setCfgAnnualAllowance(cfg?.annualAllowance ?? "");
+    const typeDef = leaveTypeOptions.find(t => t.code === leaveType);
+
+    // Monthly Increment: user override → type's monthly_accrual
+    setCfgMonthlyIncrement(
+      cfg?.monthlyIncrement ?? typeDef?.monthlyAccrual ?? ""
+    );
+    // Annual Allowance: user override → type's initial_balance (used by annual_reset and as cap)
+    setCfgAnnualAllowance(
+      cfg?.annualAllowance ?? typeDef?.initialBalance ?? ""
+    );
+    // Max Balance still tracked internally; UI no longer exposes it (folded into Annual Allowance)
     setCfgMaxBalance(cfg?.maxBalance ?? "");
-  }, [selectedUserId, leaveType, userConfigs]);
+  }, [selectedUserId, leaveType, userConfigs, leaveTypeOptions]);
 
   const resignMutation = useMutation({
     mutationFn: async () => {
@@ -516,9 +529,9 @@ export default function AdminLeavePage() {
                     const strat = leaveTypeOptions.find(t => t.code === leaveType)?.accrualStrategy;
                     if (!strat) return null;
                     const hint: Record<string, string> = {
-                      monthly_fixed:  "Monthly Increment + Max Balance apply",
-                      monthly_tenure: "Tenure formula + Max Balance apply",
-                      annual_reset:   "Annual Allowance + Max Balance apply (resets every January)",
+                      monthly_fixed:  "Monthly Increment is added monthly, capped at Annual Allowance",
+                      monthly_tenure: "Tenure formula (7→14 days/yr) is added monthly, capped at Annual Allowance",
+                      annual_reset:   "Balance resets to Annual Allowance every January",
                       manual_only:    "No automatic accrual",
                     };
                     return (
@@ -592,12 +605,7 @@ export default function AdminLeavePage() {
                         value={cfgAnnualAllowance} onChange={(e) => setCfgAnnualAllowance(e.target.value)}
                         data-testid="input-cfg-annual" />
                     </div>
-                    <div className="space-y-1 col-span-2">
-                      <Label htmlFor="cfg-max" className="text-xs">Max Balance (caps the balance)</Label>
-                      <Input id="cfg-max" type="number" min="0" step="0.5" placeholder="—"
-                        value={cfgMaxBalance} onChange={(e) => setCfgMaxBalance(e.target.value)}
-                        data-testid="input-cfg-max" />
-                    </div>
+                    {/* Max Balance field removed — Annual Allowance now serves as both the reset value and the cap */}
                   </div>
                   <p className="text-xs text-muted-foreground">
                     Leave a field blank to inherit the leave-type default.
@@ -1011,13 +1019,21 @@ export default function AdminLeavePage() {
                   <p className="text-sm text-muted-foreground">Employee</p>
                   <p className="font-medium">{getUserName(selectedApplication.userId)}</p>
                 </div>
-                <div className="flex items-center gap-2">
-                  <p className="font-medium">{selectedApplication.leaveType}</p>
-                  {selectedApplication.leaveType === "MC" && selectedApplication.submissionTiming && (
-                    <Badge variant="outline">
-                      {selectedApplication.submissionTiming === "pre_event" ? "Planned" : "Post-event"}
-                    </Badge>
-                  )}
+                <div>
+                  <p className="text-sm text-muted-foreground">Leave Type</p>
+                  <div className="flex items-center gap-2">
+                    <p className="font-medium">
+                      {(() => {
+                        const lt = leaveTypeOptions.find(t => t.code === selectedApplication.leaveType);
+                        return lt ? `${lt.label} (${lt.code})` : selectedApplication.leaveType;
+                      })()}
+                    </p>
+                    {selectedApplication.leaveType === "MC" && selectedApplication.submissionTiming && (
+                      <Badge variant="outline">
+                        {selectedApplication.submissionTiming === "pre_event" ? "Planned" : "Post-event"}
+                      </Badge>
+                    )}
+                  </div>
                 </div>
                 <div>
                   <p className="text-sm text-muted-foreground">Duration</p>
@@ -1051,13 +1067,16 @@ export default function AdminLeavePage() {
                             const isRelevant = b.leaveType === selectedApplication.leaveType;
                             const bal = parseFloat(b.balance || '0');
                             const elig = parseFloat(b.eligible || '0');
+                            const ltLabel = leaveTypeOptions.find(t => t.code === b.leaveType)?.label;
                             return (
                               <div
                                 key={b.id}
                                 className={`flex items-baseline justify-between text-blue-900 dark:text-blue-200 ${isRelevant ? "font-bold underline underline-offset-2" : ""}`}
                                 data-testid={`balance-${b.leaveType}`}
                               >
-                                <span className="text-xs uppercase">{b.leaveType}</span>
+                                <span className="text-xs" title={b.leaveType}>
+                                  {ltLabel ? `${ltLabel} (${b.leaveType})` : b.leaveType}
+                                </span>
                                 <span className={bal < 0 ? "text-destructive font-semibold" : ""}>
                                   {bal.toFixed(1)} / {elig.toFixed(1)}
                                 </span>
