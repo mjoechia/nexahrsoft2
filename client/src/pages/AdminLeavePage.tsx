@@ -189,8 +189,8 @@ export default function AdminLeavePage() {
     severity: "high" | "med";
     title: string;
     subtitle: string;
-    primaryLabel: string;
-    onPrimary: () => void;
+    primaryLabel?: string;
+    onPrimary?: () => void;
     secondaryLabel?: string;
     onSecondary?: () => void;
   };
@@ -210,23 +210,22 @@ export default function AdminLeavePage() {
         onPrimary: () => openReview(app),
       });
     });
-  // Overdrawn balances
+  // Overdrawn balances — informational only (cron auto-clears on 1st of next month)
+  const nextMonthLabel = (() => {
+    const d = new Date();
+    d.setMonth(d.getMonth() + 1, 1);
+    return d.toLocaleDateString("en-SG", { day: "numeric", month: "short" });
+  })();
   lowBalances
     .filter(b => b.isOverdrawn)
     .slice(0, 3)
     .forEach(b => {
       urgentItems.push({
         id: `bal-${b.id}`,
-        severity: "high",
+        severity: "med",
         title: `${toTitleCase(b.employeeName) || getUserName(b.userId)} ${b.leaveType} balance < 0`,
-        subtitle: `Overdrafted · Balance: ${b.remaining.toFixed(1)} days`,
-        primaryLabel: "Adjust",
-        onPrimary: () => {
-          setSelectedUserId(b.userId);
-          setLeaveType(b.leaveType);
-          setTotalDays(String(b.eligible || ""));
-          setBalanceDialogOpen(true);
-        },
+        subtitle: `${b.remaining.toFixed(1)} days · Auto-resets to 0 on ${nextMonthLabel}`,
+        // No primary action — handled automatically by monthly cron
       });
     });
   // Low-but-not-overdrawn balances
@@ -462,9 +461,11 @@ export default function AdminLeavePage() {
                           {item.secondaryLabel}
                         </Button>
                       )}
-                      <Button size="sm" onClick={item.onPrimary} data-testid={`button-urgent-${item.id}`}>
-                        {item.primaryLabel}
-                      </Button>
+                      {item.primaryLabel && (
+                        <Button size="sm" onClick={item.onPrimary} data-testid={`button-urgent-${item.id}`}>
+                          {item.primaryLabel}
+                        </Button>
+                      )}
                     </div>
                   </div>
                 ))}
