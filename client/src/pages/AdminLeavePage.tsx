@@ -8,7 +8,7 @@ import {
   CheckCircle, XCircle,
 } from "lucide-react";
 import { Link } from "wouter";
-import type { User, LeaveBalance, LeaveApplication, LeaveTypeRow } from "@shared/schema";
+import type { User, LeaveBalance, LeaveApplication, LeaveTypeRow, EmployeeLeaveTypeConfig } from "@shared/schema";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
@@ -106,22 +106,54 @@ export default function AdminLeavePage() {
   const leaveTypeOptions = leaveTypesData?.leaveTypes || [];
 
   // ─── Mutations ───────────────────────────────────────────────────────
+  // Combined save: balance fields + accrual config. Independent endpoints, so we use
+  // Promise.allSettled and explicitly report partial-success failures.
   const setBalanceMutation = useMutation({
-    mutationFn: async () => apiRequest("POST", "/api/admin/leave/balances", {
-      userId: selectedUserId,
-      leaveType,
-      broughtForward: parseFloat(bfDays) || 0,
-      earned:         parseFloat(earnedDays) || 0,
-      eligible:       parseFloat(eligibleDays) || 0,
-      taken:          parseFloat(takenDays) || 0,
-      balance:        parseFloat(balanceDays) || 0,
-    }),
-    onSuccess: () => {
-      toast({ title: "Leave balance updated" });
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/leave/balances"] });
-      setBalanceDialogOpen(false);
-      setSelectedUserId(""); setLeaveType("");
-      setBfDays(""); setEarnedDays(""); setEligibleDays(""); setTakenDays(""); setBalanceDays("");
+    mutationFn: async () => {
+      const balPromise = apiRequest("POST", "/api/admin/leave/balances", {
+        userId: selectedUserId,
+        leaveType,
+        broughtForward: parseFloat(bfDays) || 0,
+        earned:         parseFloat(earnedDays) || 0,
+        eligible:       parseFloat(eligibleDays) || 0,
+        taken:          parseFloat(takenDays) || 0,
+        balance:        parseFloat(balanceDays) || 0,
+      });
+      const cfgPromise = apiRequest("POST", "/api/admin/leave/configs", {
+        userId: selectedUserId,
+        leaveTypeCode: leaveType,
+        monthlyIncrement: cfgMonthlyIncrement === "" ? null : (parseFloat(cfgMonthlyIncrement) || 0),
+        annualAllowance:  cfgAnnualAllowance  === "" ? null : (parseFloat(cfgAnnualAllowance)  || 0),
+        maxBalance:       cfgMaxBalance       === "" ? null : (parseFloat(cfgMaxBalance)       || 0),
+        notes:            "Edited via Team Snapshot Adjust",
+      });
+      const [balRes, cfgRes] = await Promise.allSettled([balPromise, cfgPromise]);
+      return { balRes, cfgRes };
+    },
+    onSuccess: ({ balRes, cfgRes }) => {
+      const balOk = balRes.status === "fulfilled";
+      const cfgOk = cfgRes.status === "fulfilled";
+
+      if (balOk) {
+        queryClient.invalidateQueries({ queryKey: ["/api/admin/leave/balances"] });
+      }
+      if (cfgOk) {
+        queryClient.invalidateQueries({ queryKey: ["/api/admin/users", selectedUserId, "leave-configs"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
+      }
+
+      if (balOk && cfgOk) {
+        toast({ title: "Saved" });
+        setBalanceDialogOpen(false);
+        resetAdjustFields();
+        setSelectedUserId("");
+      } else if (balOk) {
+        toast({ title: "Partial save", description: "Balance saved, but accrual config did not. Try saving again.", variant: "destructive" });
+      } else if (cfgOk) {
+        toast({ title: "Partial save", description: "Accrual config saved, but balance did not. Try saving again.", variant: "destructive" });
+      } else {
+        toast({ title: "Save failed", description: "Neither balance nor config was saved.", variant: "destructive" });
+      }
     },
     onError: (err: Error) => toast({ title: "Failed", description: err.message, variant: "destructive" }),
   });
@@ -361,22 +393,28 @@ export default function AdminLeavePage() {
   const safePage = Math.min(snapshotPage, totalSnapshotPages - 1);
   const visibleRows = filteredSnapshotRows.slice(safePage * pageSize, (safePage + 1) * pageSize);
 
-  // AL Settings dialog state
-  const [alConfigOpen, setAlConfigOpen] = useState(false);
-  const [alConfigUser, setAlConfigUser] = useState<User | null>(null);
-  const [alConfigMax, setAlConfigMax] = useState("");
-  const [alConfigIncrement, setAlConfigIncrement] = useState("");
+  // Adjust dialog — accrual config fields (added alongside the 5 balance fields)
+  const [cfgMonthlyIncrement, setCfgMonthlyIncrement] = useState("");
+  const [cfgAnnualAllowance, setCfgAnnualAllowance]   = useState("");
+  const [cfgMaxBalance, setCfgMaxBalance]             = useState("");
 
   // Resign dialog state
   const [resignOpen, setResignOpen] = useState(false);
   const [resignUser, setResignUser] = useState<User | null>(null);
   const [resignDate, setResignDate] = useState("");
 
-  const openAlConfig = (u: User) => {
-    setAlConfigUser(u);
-    setAlConfigMax(u.alMaxLeave != null ? String(u.alMaxLeave) : "");
-    setAlConfigIncrement(u.alMonthlyIncrement != null ? String(u.alMonthlyIncrement) : "");
-    setAlConfigOpen(true);
+  // Reset every Adjust-dialog field (8 total) — used on open + on successful save
+  const resetAdjustFields = () => {
+    setLeaveType("");
+    setBfDays(""); setEarnedDays(""); setEligibleDays(""); setTakenDays(""); setBalanceDays("");
+    setCfgMonthlyIncrement(""); setCfgAnnualAllowance(""); setCfgMaxBalance("");
+  };
+
+  // Per-row Adjust button → wipes prior selection then opens dialog
+  const openAdjust = (userId: string) => {
+    resetAdjustFields();
+    setSelectedUserId(userId);
+    setBalanceDialogOpen(true);
   };
 
   const openResign = (u: User) => {
@@ -385,21 +423,26 @@ export default function AdminLeavePage() {
     setResignOpen(true);
   };
 
-  const alConfigMutation = useMutation({
-    mutationFn: async () => {
-      if (!alConfigUser) return;
-      return apiRequest("PATCH", `/api/admin/users/${alConfigUser.id}/al-config`, {
-        alMaxLeave: alConfigMax === "" ? null : parseFloat(alConfigMax),
-        alMonthlyIncrement: alConfigIncrement === "" ? null : parseFloat(alConfigIncrement),
-      });
-    },
-    onSuccess: () => {
-      toast({ title: "AL config saved" });
-      setAlConfigOpen(false);
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
-    },
-    onError: (err: Error) => toast({ title: "Failed", description: err.message, variant: "destructive" }),
+  // Fetch the user's full configs array once (cached by React Query).
+  // Picking a leave type then derives the right config locally — no per-type fetches.
+  const { data: userConfigsData } = useQuery<{ configs: EmployeeLeaveTypeConfig[] }>({
+    queryKey: ["/api/admin/users", selectedUserId, "leave-configs"],
+    enabled: !!selectedUserId,
   });
+  const userConfigs = userConfigsData?.configs || [];
+
+  // Prefill 3 config fields from the cached configs array whenever (userConfigs, leaveType) changes.
+  // Local derivation — no per-type fetch, so rapid type-switching is race-free.
+  useEffect(() => {
+    if (!selectedUserId || !leaveType) {
+      setCfgMonthlyIncrement(""); setCfgAnnualAllowance(""); setCfgMaxBalance("");
+      return;
+    }
+    const cfg = userConfigs.find(c => c.leaveTypeCode === leaveType);
+    setCfgMonthlyIncrement(cfg?.monthlyIncrement ?? "");
+    setCfgAnnualAllowance(cfg?.annualAllowance ?? "");
+    setCfgMaxBalance(cfg?.maxBalance ?? "");
+  }, [selectedUserId, leaveType, userConfigs]);
 
   const resignMutation = useMutation({
     mutationFn: async () => {
@@ -429,10 +472,15 @@ export default function AdminLeavePage() {
         </div>
         <div className="flex items-center gap-2">
           {/* Adjust Balance dialog (opened from per-row buttons in Team Snapshot) */}
-          <Dialog open={balanceDialogOpen} onOpenChange={setBalanceDialogOpen}>
-            <DialogContent>
+          <Dialog open={balanceDialogOpen} onOpenChange={(o) => { setBalanceDialogOpen(o); if (!o) { resetAdjustFields(); setSelectedUserId(""); } }}>
+            <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
               <DialogHeader>
-                <DialogTitle>Set Employee Leave Balance</DialogTitle>
+                <DialogTitle>
+                  Set Employee Leave{(() => {
+                    const u = allUsers.find(x => x.id === selectedUserId);
+                    return u ? ` — ${toTitleCase(u.name) || u.username}` : "";
+                  })()}
+                </DialogTitle>
               </DialogHeader>
               <div className="space-y-4">
                 <div className="space-y-2">
@@ -450,7 +498,7 @@ export default function AdminLeavePage() {
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="space-y-2">
+                <div className="space-y-1">
                   <Label htmlFor="leave-type">Leave Type</Label>
                   <Select value={leaveType} onValueChange={setLeaveType}>
                     <SelectTrigger id="leave-type" data-testid="select-leave-type">
@@ -464,6 +512,21 @@ export default function AdminLeavePage() {
                       ))}
                     </SelectContent>
                   </Select>
+                  {(() => {
+                    const strat = leaveTypeOptions.find(t => t.code === leaveType)?.accrualStrategy;
+                    if (!strat) return null;
+                    const hint: Record<string, string> = {
+                      monthly_fixed:  "Monthly Increment + Max Balance apply",
+                      monthly_tenure: "Tenure formula + Max Balance apply",
+                      annual_reset:   "Annual Allowance + Max Balance apply (resets every January)",
+                      manual_only:    "No automatic accrual",
+                    };
+                    return (
+                      <p className="text-[11px] text-muted-foreground">
+                        Strategy: <code className="text-[10px]">{strat}</code> — {hint[strat] || ""}
+                      </p>
+                    );
+                  })()}
                 </div>
                 {/* All 5 balance fields editable. Values are prefilled from the existing row when present. */}
                 <div className="rounded-md border bg-muted/30 p-3 space-y-3">
@@ -507,12 +570,43 @@ export default function AdminLeavePage() {
                       setBalanceDays(String(eligible - taken));
                     }}
                     data-testid="button-auto-fill">
-                    Auto-fill Eligible &amp; Balance from BF + Earned − Taken
+                    Recalculate: Eligible = BF + Earned, Balance = Eligible − Taken
                   </Button>
                 </div>
+
+                {/* Accrual Config (per-employee, per-leave-type). Blank = inherit leave-type default. */}
+                <div className="rounded-md border bg-muted/30 p-3 space-y-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Accrual Config
+                  </p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <Label htmlFor="cfg-monthly" className="text-xs">Monthly Increment</Label>
+                      <Input id="cfg-monthly" type="number" min="0" step="0.5" placeholder="—"
+                        value={cfgMonthlyIncrement} onChange={(e) => setCfgMonthlyIncrement(e.target.value)}
+                        data-testid="input-cfg-monthly" />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="cfg-annual" className="text-xs">Annual Allowance</Label>
+                      <Input id="cfg-annual" type="number" min="0" step="0.5" placeholder="—"
+                        value={cfgAnnualAllowance} onChange={(e) => setCfgAnnualAllowance(e.target.value)}
+                        data-testid="input-cfg-annual" />
+                    </div>
+                    <div className="space-y-1 col-span-2">
+                      <Label htmlFor="cfg-max" className="text-xs">Max Balance (caps the balance)</Label>
+                      <Input id="cfg-max" type="number" min="0" step="0.5" placeholder="—"
+                        value={cfgMaxBalance} onChange={(e) => setCfgMaxBalance(e.target.value)}
+                        data-testid="input-cfg-max" />
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Leave a field blank to inherit the leave-type default.
+                  </p>
+                </div>
+
                 <Button onClick={handleSetBalance} disabled={setBalanceMutation.isPending || isViewOnlyAdmin || !selectedUserId || !leaveType}
                   data-testid="button-submit-balance" className="w-full">
-                  {setBalanceMutation.isPending ? "Saving…" : "Save Balance"}
+                  {setBalanceMutation.isPending ? "Saving…" : "Save"}
                 </Button>
               </div>
             </DialogContent>
@@ -758,18 +852,12 @@ export default function AdminLeavePage() {
                     <TableCell className="text-sm text-muted-foreground">{r.nextLeave}</TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-1">
-                        <Button size="sm" variant="outline" onClick={() => openAlConfig(r.user)}
-                          data-testid={`button-al-config-${r.user.id}`}>
-                          AL Settings
-                        </Button>
                         <Button size="sm" variant="outline" onClick={() => openResign(r.user)}
                           data-testid={`button-resign-${r.user.id}`}>
-                          {r.user.resignDate ? "Resign…" : "Resign…"}
+                          Resign…
                         </Button>
-                        <Button size="sm" onClick={() => {
-                          setSelectedUserId(r.user.id);
-                          setBalanceDialogOpen(true);
-                        }} data-testid={`button-adjust-${r.user.id}`}>
+                        <Button size="sm" onClick={() => openAdjust(r.user.id)}
+                          data-testid={`button-adjust-${r.user.id}`}>
                           Adjust
                         </Button>
                       </div>
@@ -802,48 +890,7 @@ export default function AdminLeavePage() {
         )}
       </Card>
 
-      {/* ─── AL Settings Dialog (Max Leave + Monthly Increment) ─── */}
-      <Dialog open={alConfigOpen} onOpenChange={setAlConfigOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>AL Settings — {alConfigUser ? (toTitleCase(alConfigUser.name) || alConfigUser.username) : ""}</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="al-max">Max Leave (annual ceiling, days)</Label>
-              <Input
-                id="al-max" type="number" min="0" step="0.5" placeholder="14"
-                value={alConfigMax}
-                onChange={(e) => setAlConfigMax(e.target.value)}
-                data-testid="input-al-max"
-              />
-              <p className="text-xs text-muted-foreground">
-                Monthly accrual stops once balance reaches this. Leave blank for no cap.
-              </p>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="al-incr">Monthly Increment (days/month)</Label>
-              <Input
-                id="al-incr" type="number" min="0" step="0.5" placeholder="1.0"
-                value={alConfigIncrement}
-                onChange={(e) => setAlConfigIncrement(e.target.value)}
-                data-testid="input-al-increment"
-              />
-              <p className="text-xs text-muted-foreground">
-                Added to AL balance on the 1st of each month (capped by Max Leave). Leave blank for none.
-              </p>
-            </div>
-            <div className="flex justify-end gap-2 pt-2">
-              <Button variant="outline" onClick={() => setAlConfigOpen(false)} disabled={alConfigMutation.isPending}>
-                Cancel
-              </Button>
-              <Button onClick={() => alConfigMutation.mutate()} disabled={alConfigMutation.isPending} data-testid="button-save-al-config">
-                {alConfigMutation.isPending ? "Saving…" : "Save"}
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+      {/* AL Settings dialog removed — folded into Adjust (per-row Adjust button opens the combined editor). */}
 
       {/* ─── Resign Date Dialog ─── */}
       <Dialog open={resignOpen} onOpenChange={setResignOpen}>
