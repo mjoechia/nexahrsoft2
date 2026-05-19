@@ -665,6 +665,46 @@ export default function AdminLeavePage() {
                   <p className="text-sm text-muted-foreground">Reason</p>
                   <p className="text-sm">{selectedApplication.reason}</p>
                 </div>
+
+                {/* All current leave balances for this applicant */}
+                {(() => {
+                  const yr = new Date(selectedApplication.startDate).getFullYear() || new Date().getFullYear();
+                  const userBalances = balances
+                    .filter(b => b.userId === selectedApplication.userId && b.year === yr)
+                    .sort((a, b) => a.leaveType.localeCompare(b.leaveType));
+                  return (
+                    <div className="rounded-md border border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-950/30 p-3">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-blue-900 dark:text-blue-200 mb-2">
+                        Current Leave Balances ({yr})
+                      </p>
+                      {userBalances.length === 0 ? (
+                        <p className="text-xs text-blue-900/70 dark:text-blue-200/70">
+                          No balance records on file for this employee.
+                        </p>
+                      ) : (
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+                          {userBalances.map(b => {
+                            const isRelevant = b.leaveType === selectedApplication.leaveType;
+                            const bal = parseFloat(b.balance || '0');
+                            const elig = parseFloat(b.eligible || '0');
+                            return (
+                              <div
+                                key={b.id}
+                                className={`flex items-baseline justify-between text-blue-900 dark:text-blue-200 ${isRelevant ? "font-bold underline underline-offset-2" : ""}`}
+                                data-testid={`balance-${b.leaveType}`}
+                              >
+                                <span className="text-xs uppercase">{b.leaveType}</span>
+                                <span className={bal < 0 ? "text-destructive font-semibold" : ""}>
+                                  {bal.toFixed(1)} / {elig.toFixed(1)}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
 
               <div className="space-y-2">
