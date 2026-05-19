@@ -27,6 +27,9 @@ export const users = appSchema.table("users", {
   fingerId: text("finger_id"), // Finger/Face ID
   joinDate: text("join_date"), // Join date (DD-MM-YYYY)
   resignDate: text("resign_date"), // Resign date (DD-MM-YYYY)
+  // AL accrual configuration (per-employee)
+  alMaxLeave: numeric("al_max_leave", { precision: 4, scale: 2 }), // Annual leave ceiling (e.g., 14). Monthly accrual stops when balance reaches this.
+  alMonthlyIncrement: numeric("al_monthly_increment", { precision: 4, scale: 2 }), // Days added per month (e.g., 1.0)
   welcomeEmailSentAt: timestamp("welcome_email_sent_at"), // When welcome email was last sent
   mustChangePassword: boolean("must_change_password").notNull().default(false), // Force password change on first login
   isArchived: boolean("is_archived").notNull().default(false), // Hidden from all views when true

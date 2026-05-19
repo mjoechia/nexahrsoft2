@@ -1482,6 +1482,51 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Admin: update per-employee AL accrual config (max + monthly increment)
+  app.patch("/api/admin/users/:id/al-config", requireAdmin, requireWriteAccess, requireFullAdmin, async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      const schema = z.object({
+        alMaxLeave: z.number().min(0).nullable().optional(),
+        alMonthlyIncrement: z.number().min(0).nullable().optional(),
+      });
+      const data = schema.parse(req.body);
+
+      const user = await storage.getUser(id);
+      if (!user) return res.status(404).json({ message: "User not found" });
+
+      const updates: any = {};
+      if (data.alMaxLeave !== undefined) updates.alMaxLeave = data.alMaxLeave === null ? null : String(data.alMaxLeave);
+      if (data.alMonthlyIncrement !== undefined) updates.alMonthlyIncrement = data.alMonthlyIncrement === null ? null : String(data.alMonthlyIncrement);
+
+      await storage.updateUser(id, updates);
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Update AL config error:", error);
+      res.status(500).json({ message: error.message || "Failed to update AL config" });
+    }
+  });
+
+  // Admin: set or clear an employee's resign date
+  app.patch("/api/admin/users/:id/resign", requireAdmin, requireWriteAccess, requireFullAdmin, async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      const schema = z.object({
+        resignDate: z.string().nullable(),  // YYYY-MM-DD or null to clear
+      });
+      const { resignDate } = schema.parse(req.body);
+
+      const user = await storage.getUser(id);
+      if (!user) return res.status(404).json({ message: "User not found" });
+
+      await storage.updateUser(id, { resignDate });
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Update resign date error:", error);
+      res.status(500).json({ message: error.message || "Failed to update resign date" });
+    }
+  });
+
   // Change admin user password (nexadmin/master admin only)
   app.patch("/api/admin/users/:id/password", requireAdmin, async (req: Request, res: Response) => {
     try {

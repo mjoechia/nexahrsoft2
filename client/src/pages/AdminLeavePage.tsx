@@ -5,7 +5,7 @@ import { toTitleCase } from "@/lib/utils";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import {
   ArrowLeft, AlertOctagon, AlertTriangle, Hourglass, Users, ArrowRight,
-  CheckCircle, XCircle, MoreVertical, Plus,
+  CheckCircle, XCircle,
 } from "lucide-react";
 import { Link } from "wouter";
 import type { User, LeaveBalance, LeaveApplication, LeaveTypeRow } from "@shared/schema";
@@ -13,7 +13,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger,
+  Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -173,6 +173,24 @@ export default function AdminLeavePage() {
   const onLeaveTodayApps = applications.filter(a =>
     a.status === "approved" && a.startDate <= today && a.endDate >= today
   );
+
+  // Compute Mon-Sun ISO range for the current week
+  const weekRange = (() => {
+    const d = new Date(today + "T00:00:00");
+    const dow = d.getDay(); // 0=Sun
+    const daysFromMonday = (dow + 6) % 7; // Mon=0, Sun=6
+    const monday = new Date(d);
+    monday.setDate(d.getDate() - daysFromMonday);
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+    const fmt = (x: Date) => x.toISOString().slice(0, 10);
+    return { start: fmt(monday), end: fmt(sunday) };
+  })();
+
+  // Applications whose date range overlaps the current week
+  const onLeaveThisWeekApps = applications.filter(a =>
+    a.status === "approved" && a.startDate <= weekRange.end && a.endDate >= weekRange.start
+  );
   const lowBalances = balances
     .map(b => {
       const remaining = parseFloat(b.balance || "0");
@@ -295,9 +313,78 @@ export default function AdminLeavePage() {
   });
 
   const [snapshotPage, setSnapshotPage] = useState(0);
+  const [snapshotSearch, setSnapshotSearch] = useState("");
   const pageSize = 10;
-  const totalSnapshotPages = Math.max(1, Math.ceil(snapshotRows.length / pageSize));
-  const visibleRows = snapshotRows.slice(snapshotPage * pageSize, (snapshotPage + 1) * pageSize);
+
+  const filteredSnapshotRows = (() => {
+    const q = snapshotSearch.trim().toLowerCase();
+    if (!q) return snapshotRows;
+    return snapshotRows.filter(r => {
+      const name = (r.user.name || "").toLowerCase();
+      const email = (r.user.email || "").toLowerCase();
+      const code = (r.user.employeeCode || "").toLowerCase();
+      return name.includes(q) || email.includes(q) || code.includes(q);
+    });
+  })();
+
+  const totalSnapshotPages = Math.max(1, Math.ceil(filteredSnapshotRows.length / pageSize));
+  const safePage = Math.min(snapshotPage, totalSnapshotPages - 1);
+  const visibleRows = filteredSnapshotRows.slice(safePage * pageSize, (safePage + 1) * pageSize);
+
+  // AL Settings dialog state
+  const [alConfigOpen, setAlConfigOpen] = useState(false);
+  const [alConfigUser, setAlConfigUser] = useState<User | null>(null);
+  const [alConfigMax, setAlConfigMax] = useState("");
+  const [alConfigIncrement, setAlConfigIncrement] = useState("");
+
+  // Resign dialog state
+  const [resignOpen, setResignOpen] = useState(false);
+  const [resignUser, setResignUser] = useState<User | null>(null);
+  const [resignDate, setResignDate] = useState("");
+
+  const openAlConfig = (u: User) => {
+    setAlConfigUser(u);
+    setAlConfigMax(u.alMaxLeave != null ? String(u.alMaxLeave) : "");
+    setAlConfigIncrement(u.alMonthlyIncrement != null ? String(u.alMonthlyIncrement) : "");
+    setAlConfigOpen(true);
+  };
+
+  const openResign = (u: User) => {
+    setResignUser(u);
+    setResignDate(u.resignDate || "");
+    setResignOpen(true);
+  };
+
+  const alConfigMutation = useMutation({
+    mutationFn: async () => {
+      if (!alConfigUser) return;
+      return apiRequest("PATCH", `/api/admin/users/${alConfigUser.id}/al-config`, {
+        alMaxLeave: alConfigMax === "" ? null : parseFloat(alConfigMax),
+        alMonthlyIncrement: alConfigIncrement === "" ? null : parseFloat(alConfigIncrement),
+      });
+    },
+    onSuccess: () => {
+      toast({ title: "AL config saved" });
+      setAlConfigOpen(false);
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
+    },
+    onError: (err: Error) => toast({ title: "Failed", description: err.message, variant: "destructive" }),
+  });
+
+  const resignMutation = useMutation({
+    mutationFn: async () => {
+      if (!resignUser) return;
+      return apiRequest("PATCH", `/api/admin/users/${resignUser.id}/resign`, {
+        resignDate: resignDate.trim() === "" ? null : resignDate,
+      });
+    },
+    onSuccess: () => {
+      toast({ title: resignDate ? "Resign date set" : "Resign date cleared" });
+      setResignOpen(false);
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
+    },
+    onError: (err: Error) => toast({ title: "Failed", description: err.message, variant: "destructive" }),
+  });
 
   // ─── Render ──────────────────────────────────────────────────────────
   return (
@@ -311,13 +398,8 @@ export default function AdminLeavePage() {
           <p className="text-sm text-muted-foreground">Operations overview for the HR admin</p>
         </div>
         <div className="flex items-center gap-2">
+          {/* Adjust Balance dialog (opened from per-row buttons in Team Snapshot) */}
           <Dialog open={balanceDialogOpen} onOpenChange={setBalanceDialogOpen}>
-            <DialogTrigger asChild>
-              <Button variant="outline" data-testid="button-adjust-balance">
-                <Plus className="h-4 w-4 mr-2" />
-                Adjust Balance
-              </Button>
-            </DialogTrigger>
             <DialogContent>
               <DialogHeader>
                 <DialogTitle>Set Employee Leave Balance</DialogTitle>
@@ -474,28 +556,86 @@ export default function AdminLeavePage() {
           </CardContent>
         </Card>
 
-        {/* Staffing Risk placeholder */}
+        {/* Staff on Leave — today + this week */}
         <Card className="lg:col-span-5">
-          <CardHeader>
-            <CardTitle className="text-lg">Staffing Risk Heatmap</CardTitle>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-lg">Staff on Leave</CardTitle>
           </CardHeader>
-          <CardContent className="flex flex-col items-center justify-center py-12 text-center gap-2">
-            <Hourglass className="h-8 w-8 text-muted-foreground" />
-            <p className="text-sm font-medium">Coming soon</p>
-            <p className="text-xs text-muted-foreground max-w-xs">
-              Needs department data on each employee. Once <code>users.department</code> is populated, this panel will show weekly leave coverage by team.
-            </p>
+          <CardContent className="p-0">
+            <div className="grid grid-cols-2 divide-x">
+              {/* Today */}
+              <div className="p-4">
+                <div className="flex items-baseline justify-between mb-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Today</p>
+                  <span className="text-2xl font-semibold">{onLeaveTodayApps.length}</span>
+                </div>
+                {onLeaveTodayApps.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">Nobody on leave</p>
+                ) : (
+                  <ul className="space-y-1 max-h-44 overflow-y-auto">
+                    {onLeaveTodayApps.slice(0, 8).map(a => (
+                      <li key={a.id} className="text-xs flex items-center gap-2">
+                        <span className="h-1.5 w-1.5 rounded-full bg-amber-500 shrink-0" />
+                        <span className="truncate font-medium">{getUserName(a.userId)}</span>
+                        <Badge variant="outline" className="text-[10px] px-1 py-0">{a.leaveType}</Badge>
+                        <span className="text-muted-foreground truncate ml-auto">→ {formatDateShort(a.endDate)}</span>
+                      </li>
+                    ))}
+                    {onLeaveTodayApps.length > 8 && (
+                      <li className="text-xs text-muted-foreground italic">+{onLeaveTodayApps.length - 8} more</li>
+                    )}
+                  </ul>
+                )}
+              </div>
+              {/* This week */}
+              <div className="p-4">
+                <div className="flex items-baseline justify-between mb-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">This Week</p>
+                  <span className="text-2xl font-semibold">{onLeaveThisWeekApps.length}</span>
+                </div>
+                {onLeaveThisWeekApps.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">No leave this week</p>
+                ) : (
+                  <ul className="space-y-1 max-h-44 overflow-y-auto">
+                    {onLeaveThisWeekApps.slice(0, 8).map(a => (
+                      <li key={a.id} className="text-xs flex items-center gap-2">
+                        <span className="h-1.5 w-1.5 rounded-full bg-blue-500 shrink-0" />
+                        <span className="truncate font-medium">{getUserName(a.userId)}</span>
+                        <Badge variant="outline" className="text-[10px] px-1 py-0">{a.leaveType}</Badge>
+                        <span className="text-muted-foreground truncate ml-auto">
+                          {formatDateShort(a.startDate)}–{formatDateShort(a.endDate)}
+                        </span>
+                      </li>
+                    ))}
+                    {onLeaveThisWeekApps.length > 8 && (
+                      <li className="text-xs text-muted-foreground italic">+{onLeaveThisWeekApps.length - 8} more</li>
+                    )}
+                  </ul>
+                )}
+              </div>
+            </div>
           </CardContent>
         </Card>
       </div>
 
       {/* Team Snapshot table */}
       <Card id="team-snapshot">
-        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
-          <CardTitle className="text-lg">Team Snapshot</CardTitle>
-          <p className="text-xs text-muted-foreground">
-            Showing {visibleRows.length === 0 ? 0 : snapshotPage * pageSize + 1}–{snapshotPage * pageSize + visibleRows.length} of {snapshotRows.length}
-          </p>
+        <CardHeader className="space-y-3 pb-3">
+          <div className="flex flex-row items-center justify-between gap-3 flex-wrap">
+            <CardTitle className="text-lg">Team Snapshot</CardTitle>
+            <p className="text-xs text-muted-foreground">
+              Showing {visibleRows.length === 0 ? 0 : safePage * pageSize + 1}–{safePage * pageSize + visibleRows.length} of {filteredSnapshotRows.length}
+              {snapshotSearch && ` (filtered from ${snapshotRows.length})`}
+            </p>
+          </div>
+          <Input
+            type="search"
+            placeholder="Search by name, email, or employee code…"
+            value={snapshotSearch}
+            onChange={(e) => { setSnapshotSearch(e.target.value); setSnapshotPage(0); }}
+            className="max-w-sm"
+            data-testid="input-snapshot-search"
+          />
         </CardHeader>
         <CardContent className="p-0">
           {balancesLoading ? (
@@ -508,15 +648,19 @@ export default function AdminLeavePage() {
                 <TableRow>
                   <TableHead>Employee</TableHead>
                   <TableHead className="text-right">AL Balance</TableHead>
+                  <TableHead className="text-right">Max / Monthly</TableHead>
                   <TableHead className="text-right">MC Balance</TableHead>
-                  <TableHead>Current Status</TableHead>
+                  <TableHead>Status</TableHead>
                   <TableHead>Next Leave</TableHead>
-                  <TableHead className="w-10"></TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {visibleRows.map(r => (
-                  <TableRow key={r.user.id} className="group">
+                {visibleRows.map(r => {
+                  const maxLv = r.user.alMaxLeave != null ? Number(r.user.alMaxLeave).toFixed(1) : "—";
+                  const incr  = r.user.alMonthlyIncrement != null ? Number(r.user.alMonthlyIncrement).toFixed(1) : "—";
+                  return (
+                  <TableRow key={r.user.id}>
                     <TableCell>
                       <div>
                         <p className="font-medium text-sm">{toTitleCase(r.user.name) || r.user.username}</p>
@@ -526,29 +670,46 @@ export default function AdminLeavePage() {
                     <TableCell className={`text-right font-medium ${r.alOverdrawn ? "text-destructive" : r.alLow ? "text-amber-600" : ""}`}>
                       {r.al}
                     </TableCell>
+                    <TableCell className="text-right text-xs text-muted-foreground">
+                      <span className="tabular-nums">{maxLv}</span> / <span className="tabular-nums">{incr}</span>/mo
+                    </TableCell>
                     <TableCell className="text-right">{r.mc}</TableCell>
                     <TableCell>
-                      {r.status.tone === "on_leave" ? (
+                      {r.user.resignDate ? (
+                        <Badge variant="destructive" title={`Resigning ${r.user.resignDate}`}>
+                          Resigning {r.user.resignDate}
+                        </Badge>
+                      ) : r.status.tone === "on_leave" ? (
                         <Badge variant="outline">{r.status.label}</Badge>
                       ) : (
                         <Badge>{r.status.label}</Badge>
                       )}
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">{r.nextLeave}</TableCell>
-                    <TableCell className="text-right opacity-0 group-hover:opacity-100 transition-opacity">
-                      <Button variant="ghost" size="icon" onClick={() => {
-                        setSelectedUserId(r.user.id);
-                        setBalanceDialogOpen(true);
-                      }}>
-                        <MoreVertical className="h-4 w-4" />
-                      </Button>
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-1">
+                        <Button size="sm" variant="outline" onClick={() => openAlConfig(r.user)}
+                          data-testid={`button-al-config-${r.user.id}`}>
+                          AL Settings
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => openResign(r.user)}
+                          data-testid={`button-resign-${r.user.id}`}>
+                          {r.user.resignDate ? "Resign…" : "Resign…"}
+                        </Button>
+                        <Button size="sm" onClick={() => {
+                          setSelectedUserId(r.user.id);
+                          setBalanceDialogOpen(true);
+                        }} data-testid={`button-adjust-${r.user.id}`}>
+                          Adjust
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
-                ))}
+                );})}
                 {visibleRows.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center text-sm text-muted-foreground py-12">
-                      No employees to display.
+                    <TableCell colSpan={7} className="text-center text-sm text-muted-foreground py-12">
+                      {snapshotSearch ? "No employees match your search." : "No employees to display."}
                     </TableCell>
                   </TableRow>
                 )}
@@ -556,19 +717,104 @@ export default function AdminLeavePage() {
             </Table>
           )}
         </CardContent>
-        {snapshotRows.length > pageSize && (
+        {filteredSnapshotRows.length > pageSize && (
           <div className="px-4 py-3 border-t flex items-center justify-end gap-2">
-            <Button size="sm" variant="outline" disabled={snapshotPage === 0}
+            <Button size="sm" variant="outline" disabled={safePage === 0}
               onClick={() => setSnapshotPage(p => Math.max(0, p - 1))}>
               Prev
             </Button>
-            <Button size="sm" variant="outline" disabled={snapshotPage >= totalSnapshotPages - 1}
+            <span className="text-xs text-muted-foreground">{safePage + 1} / {totalSnapshotPages}</span>
+            <Button size="sm" variant="outline" disabled={safePage >= totalSnapshotPages - 1}
               onClick={() => setSnapshotPage(p => Math.min(totalSnapshotPages - 1, p + 1))}>
               Next
             </Button>
           </div>
         )}
       </Card>
+
+      {/* ─── AL Settings Dialog (Max Leave + Monthly Increment) ─── */}
+      <Dialog open={alConfigOpen} onOpenChange={setAlConfigOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>AL Settings — {alConfigUser ? (toTitleCase(alConfigUser.name) || alConfigUser.username) : ""}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="al-max">Max Leave (annual ceiling, days)</Label>
+              <Input
+                id="al-max" type="number" min="0" step="0.5" placeholder="14"
+                value={alConfigMax}
+                onChange={(e) => setAlConfigMax(e.target.value)}
+                data-testid="input-al-max"
+              />
+              <p className="text-xs text-muted-foreground">
+                Monthly accrual stops once balance reaches this. Leave blank for no cap.
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="al-incr">Monthly Increment (days/month)</Label>
+              <Input
+                id="al-incr" type="number" min="0" step="0.5" placeholder="1.0"
+                value={alConfigIncrement}
+                onChange={(e) => setAlConfigIncrement(e.target.value)}
+                data-testid="input-al-increment"
+              />
+              <p className="text-xs text-muted-foreground">
+                Added to AL balance on the 1st of each month (capped by Max Leave). Leave blank for none.
+              </p>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" onClick={() => setAlConfigOpen(false)} disabled={alConfigMutation.isPending}>
+                Cancel
+              </Button>
+              <Button onClick={() => alConfigMutation.mutate()} disabled={alConfigMutation.isPending} data-testid="button-save-al-config">
+                {alConfigMutation.isPending ? "Saving…" : "Save"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ─── Resign Date Dialog ─── */}
+      <Dialog open={resignOpen} onOpenChange={setResignOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Set Resignation Date — {resignUser ? (toTitleCase(resignUser.name) || resignUser.username) : ""}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="resign-date">Resign Date</Label>
+              <Input
+                id="resign-date" type="date"
+                value={resignDate}
+                onChange={(e) => setResignDate(e.target.value)}
+                data-testid="input-resign-date"
+              />
+              <p className="text-xs text-muted-foreground">
+                Employee will be auto-archived by the daily cron on or after this date. Leave blank to clear.
+              </p>
+            </div>
+            <div className="flex justify-between items-center pt-2 gap-2">
+              <div>
+                {resignUser?.resignDate && (
+                  <Button variant="ghost" className="text-destructive" onClick={() => { setResignDate(""); resignMutation.mutate(); }}
+                    disabled={resignMutation.isPending}>
+                    Clear
+                  </Button>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={() => setResignOpen(false)} disabled={resignMutation.isPending}>
+                  Cancel
+                </Button>
+                <Button onClick={() => resignMutation.mutate()} disabled={resignMutation.isPending || !resignDate} data-testid="button-save-resign">
+                  {resignMutation.isPending ? "Saving…" : "Save"}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* ─── Pending Queue Dialog ─── */}
       <Dialog open={pendingQueueOpen} onOpenChange={setPendingQueueOpen}>
