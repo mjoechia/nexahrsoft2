@@ -59,7 +59,13 @@ export default function AdminLeavePage() {
   // Set Balance form state
   const [selectedUserId, setSelectedUserId] = useState("");
   const [leaveType, setLeaveType] = useState("");
-  const [totalDays, setTotalDays] = useState("");
+  const [totalDays, setTotalDays] = useState(""); // legacy — kept for places that still reference it
+  // Adjust Balance dialog — full per-(user, type) breakdown
+  const [bfDays, setBfDays] = useState("");
+  const [earnedDays, setEarnedDays] = useState("");
+  const [eligibleDays, setEligibleDays] = useState("");
+  const [takenDays, setTakenDays] = useState("");
+  const [balanceDays, setBalanceDays] = useState("");
 
   // Review form state
   const [selectedApplication, setSelectedApplication] = useState<LeaveApplication | null>(null);
@@ -104,16 +110,40 @@ export default function AdminLeavePage() {
     mutationFn: async () => apiRequest("POST", "/api/admin/leave/balances", {
       userId: selectedUserId,
       leaveType,
-      totalDays: parseFloat(totalDays),
+      broughtForward: parseFloat(bfDays) || 0,
+      earned:         parseFloat(earnedDays) || 0,
+      eligible:       parseFloat(eligibleDays) || 0,
+      taken:          parseFloat(takenDays) || 0,
+      balance:        parseFloat(balanceDays) || 0,
     }),
     onSuccess: () => {
       toast({ title: "Leave balance updated" });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/leave/balances"] });
       setBalanceDialogOpen(false);
-      setSelectedUserId(""); setLeaveType(""); setTotalDays("");
+      setSelectedUserId(""); setLeaveType("");
+      setBfDays(""); setEarnedDays(""); setEligibleDays(""); setTakenDays(""); setBalanceDays("");
     },
     onError: (err: Error) => toast({ title: "Failed", description: err.message, variant: "destructive" }),
   });
+
+  // Prefill the 5 balance fields from the existing row whenever (userId, leaveType) is set
+  useEffect(() => {
+    if (!selectedUserId || !leaveType) {
+      setBfDays(""); setEarnedDays(""); setEligibleDays(""); setTakenDays(""); setBalanceDays("");
+      return;
+    }
+    const yr = new Date().getFullYear();
+    const existing = balances.find(b => b.userId === selectedUserId && b.leaveType === leaveType && b.year === yr);
+    if (existing) {
+      setBfDays(String(existing.broughtForward ?? "0"));
+      setEarnedDays(String(existing.earned ?? "0"));
+      setEligibleDays(String(existing.eligible ?? "0"));
+      setTakenDays(String(existing.taken ?? "0"));
+      setBalanceDays(String(existing.balance ?? "0"));
+    } else {
+      setBfDays("0"); setEarnedDays("0"); setEligibleDays("0"); setTakenDays("0"); setBalanceDays("0");
+    }
+  }, [selectedUserId, leaveType, balances]);
 
   const reviewMutation = useMutation({
     mutationFn: async ({ applicationId, status, approvedDays }: { applicationId: string; status: "approved" | "rejected"; approvedDays?: number }) =>
@@ -134,8 +164,8 @@ export default function AdminLeavePage() {
   });
 
   const handleSetBalance = () => {
-    if (!selectedUserId || !leaveType || !totalDays) {
-      toast({ title: "Fill all fields", variant: "destructive" });
+    if (!selectedUserId || !leaveType) {
+      toast({ title: "Pick an employee and leave type", variant: "destructive" });
       return;
     }
     setBalanceMutation.mutate();
@@ -435,12 +465,52 @@ export default function AdminLeavePage() {
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="total-days">Total Days (eligible)</Label>
-                  <Input id="total-days" type="number" min="0" step="0.5" placeholder="14"
-                    value={totalDays} onChange={(e) => setTotalDays(e.target.value)} data-testid="input-total-days" />
+                {/* All 5 balance fields editable. Values are prefilled from the existing row when present. */}
+                <div className="rounded-md border bg-muted/30 p-3 space-y-3">
+                  <p className="text-xs text-muted-foreground">
+                    <strong>Eligible</strong> = Brought Forward + Earned. <strong>Balance</strong> = Eligible − Taken. Edit any field directly — the app does not auto-recompute.
+                  </p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <Label htmlFor="bf-days" className="text-xs">Brought Forward</Label>
+                      <Input id="bf-days" type="number" step="0.5" placeholder="0"
+                        value={bfDays} onChange={(e) => setBfDays(e.target.value)} data-testid="input-bf-days" />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="earned-days" className="text-xs">Earned</Label>
+                      <Input id="earned-days" type="number" step="0.5" placeholder="0"
+                        value={earnedDays} onChange={(e) => setEarnedDays(e.target.value)} data-testid="input-earned-days" />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="eligible-days" className="text-xs">Eligible</Label>
+                      <Input id="eligible-days" type="number" step="0.5" placeholder="0"
+                        value={eligibleDays} onChange={(e) => setEligibleDays(e.target.value)} data-testid="input-eligible-days" />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="taken-days" className="text-xs">Taken</Label>
+                      <Input id="taken-days" type="number" step="0.5" placeholder="0"
+                        value={takenDays} onChange={(e) => setTakenDays(e.target.value)} data-testid="input-taken-days" />
+                    </div>
+                    <div className="space-y-1 col-span-2">
+                      <Label htmlFor="balance-days" className="text-xs">Current Balance (days remaining)</Label>
+                      <Input id="balance-days" type="number" step="0.5" placeholder="0"
+                        value={balanceDays} onChange={(e) => setBalanceDays(e.target.value)} data-testid="input-balance-days" />
+                    </div>
+                  </div>
+                  <Button type="button" variant="outline" size="sm" className="w-full"
+                    onClick={() => {
+                      const bf = parseFloat(bfDays) || 0;
+                      const earned = parseFloat(earnedDays) || 0;
+                      const taken = parseFloat(takenDays) || 0;
+                      const eligible = bf + earned;
+                      setEligibleDays(String(eligible));
+                      setBalanceDays(String(eligible - taken));
+                    }}
+                    data-testid="button-auto-fill">
+                    Auto-fill Eligible &amp; Balance from BF + Earned − Taken
+                  </Button>
                 </div>
-                <Button onClick={handleSetBalance} disabled={setBalanceMutation.isPending || isViewOnlyAdmin}
+                <Button onClick={handleSetBalance} disabled={setBalanceMutation.isPending || isViewOnlyAdmin || !selectedUserId || !leaveType}
                   data-testid="button-submit-balance" className="w-full">
                   {setBalanceMutation.isPending ? "Saving…" : "Save Balance"}
                 </Button>
