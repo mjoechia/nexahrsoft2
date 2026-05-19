@@ -1483,6 +1483,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Admin: update per-employee AL accrual config (max + monthly increment)
+  // v3: write to BOTH legacy columns (for Team Snapshot read) AND the new configs table
+  // (read by the accrual cron). Once Team Snapshot is migrated, drop the legacy write.
   app.patch("/api/admin/users/:id/al-config", requireAdmin, requireWriteAccess, requireFullAdmin, async (req: Request, res: Response) => {
     try {
       const { id } = req.params;
@@ -1495,15 +1497,86 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.getUser(id);
       if (!user) return res.status(404).json({ message: "User not found" });
 
+      // Legacy column write
       const updates: any = {};
       if (data.alMaxLeave !== undefined) updates.alMaxLeave = data.alMaxLeave === null ? null : String(data.alMaxLeave);
       if (data.alMonthlyIncrement !== undefined) updates.alMonthlyIncrement = data.alMonthlyIncrement === null ? null : String(data.alMonthlyIncrement);
+      if (Object.keys(updates).length > 0) await storage.updateUser(id, updates);
 
-      await storage.updateUser(id, updates);
+      // v3: also persist as an employee_leave_type_configs row so the accrual cron picks it up
+      const resolvedMax = data.alMaxLeave !== undefined
+        ? data.alMaxLeave
+        : (user.alMaxLeave != null ? parseFloat(user.alMaxLeave) : null);
+      const resolvedIncrement = data.alMonthlyIncrement !== undefined
+        ? data.alMonthlyIncrement
+        : (user.alMonthlyIncrement != null ? parseFloat(user.alMonthlyIncrement) : null);
+
+      await storage.upsertConfig({
+        userId: id,
+        leaveTypeCode: "AL",
+        monthlyIncrement: resolvedIncrement,
+        annualAllowance: null,
+        maxBalance: resolvedMax,
+        notes: "Edited via Team Snapshot AL Settings",
+        createdBy: req.session.userId ?? null,
+      });
+
       res.json({ success: true });
     } catch (error: any) {
       console.error("Update AL config error:", error);
       res.status(500).json({ message: error.message || "Failed to update AL config" });
+    }
+  });
+
+  // Admin: get all current leave-type configs for an employee
+  app.get("/api/admin/users/:id/leave-configs", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const configs = await storage.getAllCurrentConfigsByUser(req.params.id);
+      res.json({ configs });
+    } catch (error: any) {
+      console.error("Get leave configs error:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch configs" });
+    }
+  });
+
+  // Admin: upsert a per-employee leave-type config (any leave type, not just AL)
+  app.post("/api/admin/leave/configs", requireAdmin, requireWriteAccess, requireFullAdmin, async (req: Request, res: Response) => {
+    try {
+      const schema = z.object({
+        userId: z.string(),
+        leaveTypeCode: z.string().regex(/^[A-Z0-9_]{2,10}$/),
+        monthlyIncrement: z.number().min(0).nullable().optional(),
+        annualAllowance: z.number().min(0).nullable().optional(),
+        maxBalance: z.number().min(0).nullable().optional(),
+        notes: z.string().nullable().optional(),
+      });
+      const data = schema.parse(req.body);
+      const created = await storage.upsertConfig({
+        userId: data.userId,
+        leaveTypeCode: data.leaveTypeCode,
+        monthlyIncrement: data.monthlyIncrement ?? null,
+        annualAllowance: data.annualAllowance ?? null,
+        maxBalance: data.maxBalance ?? null,
+        notes: data.notes ?? null,
+        createdBy: req.session.userId ?? null,
+      });
+      res.json({ success: true, config: created });
+    } catch (error: any) {
+      console.error("Upsert leave config error:", error);
+      res.status(500).json({ message: error.message || "Failed to upsert config" });
+    }
+  });
+
+  // Admin: manually trigger the monthly leave accrual job (idempotent via leave_accrual_runs)
+  app.post("/api/admin/leave/accrual/run", requireAdmin, requireWriteAccess, requireFullAdmin, async (req: Request, res: Response) => {
+    try {
+      const { monthlyLeaveJob } = await import("./cron");
+      await monthlyLeaveJob(`manual:${req.session.userId}`);
+      const [latest] = await storage.getRecentAccrualRuns(1);
+      res.json({ success: true, run: latest });
+    } catch (error: any) {
+      console.error("Manual accrual trigger error:", error);
+      res.status(500).json({ message: error.message || "Failed to trigger accrual" });
     }
   });
 

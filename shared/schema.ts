@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgSchema, text, varchar, boolean, timestamp, integer, real, unique, numeric } from "drizzle-orm/pg-core";
+import { pgSchema, text, varchar, boolean, timestamp, integer, real, unique, numeric, index, jsonb } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -27,9 +27,10 @@ export const users = appSchema.table("users", {
   fingerId: text("finger_id"), // Finger/Face ID
   joinDate: text("join_date"), // Join date (DD-MM-YYYY)
   resignDate: text("resign_date"), // Resign date (DD-MM-YYYY)
-  // AL accrual configuration (per-employee)
-  alMaxLeave: numeric("al_max_leave", { precision: 4, scale: 2 }), // Annual leave ceiling (e.g., 14). Monthly accrual stops when balance reaches this.
-  alMonthlyIncrement: numeric("al_monthly_increment", { precision: 4, scale: 2 }), // Days added per month (e.g., 1.0)
+  // DEPRECATED — superseded by employee_leave_type_configs (see schema below).
+  // Kept temporarily as read-fallback during the cutover. Drop in a follow-up PR.
+  alMaxLeave: numeric("al_max_leave", { precision: 4, scale: 2 }),
+  alMonthlyIncrement: numeric("al_monthly_increment", { precision: 4, scale: 2 }),
   welcomeEmailSentAt: timestamp("welcome_email_sent_at"), // When welcome email was last sent
   mustChangePassword: boolean("must_change_password").notNull().default(false), // Force password change on first login
   isArchived: boolean("is_archived").notNull().default(false), // Hidden from all views when true
@@ -1072,7 +1073,7 @@ export const leaveTypesTable = appSchema.table("leave_types", {
   isActive: boolean("is_active").notNull().default(true),
   initialBalance: numeric("initial_balance", { precision: 6, scale: 2 }).notNull().default("0"),
   monthlyAccrual: numeric("monthly_accrual", { precision: 6, scale: 2 }).notNull().default("0"),
-  accrualStrategy: text("accrual_strategy").notNull().default("flat"), // 'flat' | 'tenure_al'
+  accrualStrategy: text("accrual_strategy").notNull().default("monthly_fixed"), // 'monthly_fixed' | 'monthly_tenure' | 'annual_reset' | 'manual_only'
   sortOrder: integer("sort_order").notNull().default(0),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
@@ -1128,10 +1129,38 @@ export const leaveBalanceTransactions = appSchema.table("leave_balance_transacti
   leaveTypeCode: text("leave_type_code").notNull(),
   year: integer("year").notNull(),
   delta: numeric("delta", { precision: 6, scale: 2 }).notNull(),      // signed
-  source: text("source").notNull(),                                   // 'monthly_accrual' | 'override_accrual' | 'application_approved' | 'admin_adjustment' | 'monthly_clamp' | 'initial_seed'
+  source: text("source").notNull(),                                   // 'monthly_accrual' | 'override_accrual' | 'application_approved' | 'admin_adjustment' | 'monthly_clamp' | 'initial_seed' | 'annual_reset'
   sourceRefId: varchar("source_ref_id"),
   notes: text("notes"),
+  metadata: jsonb("metadata"),                                        // strategy details, before/after balance, cap-applied flag — for audit defence
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
 export type LeaveBalanceTransaction = typeof leaveBalanceTransactions.$inferSelect;
+
+// ─── Per-employee leave-type configs (supersedes users.al_* and overrides) ──
+// One row per (user, leaveType, effectiveFrom). Current config = the row with
+// effectiveTo IS NULL. Editing closes the current row and inserts a new one.
+export const employeeLeaveTypeConfigs = appSchema.table("employee_leave_type_configs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  leaveTypeCode: text("leave_type_code").notNull(),
+  // Accrual knobs — null means "use type-level default"
+  monthlyIncrement: numeric("monthly_increment", { precision: 6, scale: 2 }),
+  annualAllowance:  numeric("annual_allowance",  { precision: 6, scale: 2 }),
+  maxBalance:       numeric("max_balance",       { precision: 6, scale: 2 }),
+  // Effective-date validity — current = effectiveTo IS NULL
+  effectiveFrom: text("effective_from").notNull(),   // YYYY-MM-DD
+  effectiveTo:   text("effective_to"),                // YYYY-MM-DD, null = open
+  notes: text("notes"),
+  createdBy: varchar("created_by").references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => ({
+  byUserType: index("eltc_user_type_idx").on(t.userId, t.leaveTypeCode, t.effectiveFrom),
+}));
+
+export const insertEmployeeLeaveTypeConfigSchema = createInsertSchema(employeeLeaveTypeConfigs).omit({
+  id: true, createdAt: true,
+});
+export type InsertEmployeeLeaveTypeConfig = z.infer<typeof insertEmployeeLeaveTypeConfigSchema>;
+export type EmployeeLeaveTypeConfig = typeof employeeLeaveTypeConfigs.$inferSelect;

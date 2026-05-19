@@ -1,7 +1,8 @@
 import { type User, type InsertUser, type CompanySettings, type AttendanceRecord, type InsertAttendanceRecord, type UserSession, type InsertUserSession, type LoginChallenge, type InsertLoginChallenge, type PayslipRecord, type InsertPayslipRecord, type LeaveBalance, type InsertLeaveBalance, type LeaveApplication, type InsertLeaveApplication, type EmailLog, type InsertEmailLog, type AuditLog, type InsertAuditLog, type PasswordOverrideLog, type InsertPasswordOverrideLog, type PayrollRecord, type InsertPayrollRecord, type LeaveHistory, type InsertLeaveHistory, type LeaveAuditLog, type InsertLeaveAuditLog, type PayrollLoanAccount, type InsertPayrollLoanAccount, type PayrollLoanRepayment, type InsertPayrollLoanRepayment, type PayrollAuditLog, type InsertPayrollAuditLog, type DailyAttendanceSummary, type InsertDailyAttendanceSummary, type PayrollAdjustment, type InsertPayrollAdjustment, type PayrollAdjustmentAuditLog, type InsertPayrollAdjustmentAuditLog, type EmployeeSalaryAdjustment, type InsertEmployeeSalaryAdjustment, type AttendanceAdjustment, type InsertAttendanceAdjustment, type EmployeeMonthlyRemark, type InsertEmployeeMonthlyRemark, type EmployeeDataAuditLog, type InsertEmployeeDataAuditLog, type PayrollImportBatch, type InsertPayrollImportBatch, type ManualPayslip, type InsertManualPayslip, type ManualPayslipAuditLog, type InsertManualPayslipAuditLog, type Claim, type InsertClaim, type EmployeeDocument, type InsertEmployeeDocument } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { db } from "./db";
-import { users, companySettings, attendanceRecords, userSessions, loginChallenges, payslipRecords, leaveBalances, leaveApplications, emailLogs, auditLogs, passwordOverrideLogs, payrollRecords, leaveHistory, leaveAuditLogs, payrollLoanAccounts, payrollLoanRepayments, payrollAuditLogs, dailyAttendanceSummary, payrollAdjustments, payrollAdjustmentAuditLogs, employeeSalaryAdjustments, attendanceAdjustments, employeeMonthlyRemarks, employeeDataAuditLogs, payrollImportBatches, manualPayslips, manualPayslipAuditLogs, claims, claimsAuditLog, employeeDocuments, announcements, leaveTypesTable, employeeLeaveAccrualOverrides, leaveAccrualRuns, leaveBalanceTransactions } from "@shared/schema";
+import { users, companySettings, attendanceRecords, userSessions, loginChallenges, payslipRecords, leaveBalances, leaveApplications, emailLogs, auditLogs, passwordOverrideLogs, payrollRecords, leaveHistory, leaveAuditLogs, payrollLoanAccounts, payrollLoanRepayments, payrollAuditLogs, dailyAttendanceSummary, payrollAdjustments, payrollAdjustmentAuditLogs, employeeSalaryAdjustments, attendanceAdjustments, employeeMonthlyRemarks, employeeDataAuditLogs, payrollImportBatches, manualPayslips, manualPayslipAuditLogs, claims, claimsAuditLog, employeeDocuments, announcements, leaveTypesTable, employeeLeaveAccrualOverrides, leaveAccrualRuns, leaveBalanceTransactions, employeeLeaveTypeConfigs } from "@shared/schema";
+import type { EmployeeLeaveTypeConfig, InsertEmployeeLeaveTypeConfig } from "@shared/schema";
 import type { Announcement, InsertAnnouncement, LeaveTypeRow, InsertLeaveType, EmployeeLeaveAccrualOverride, InsertEmployeeLeaveAccrualOverride, LeaveAccrualRun, LeaveBalanceTransaction } from "@shared/schema";
 import { eq, or, and, gte, lte, lt, desc, asc, isNull, not, like, sql, inArray } from "drizzle-orm";
 
@@ -2618,95 +2619,273 @@ export class PgStorage implements IStorage {
       .limit(limit);
   }
 
-  // ─── Monthly Accrual (idempotent; caller must hold an accrual_runs row) ──
-  // For each active leave type × non-archived user:
-  //   - lazy-create the leave_balances row using type.initial_balance as brought_forward
-  //   - add (base + override) to balance and earned via SQL numeric arithmetic
-  //   - write one ledger row per non-zero delta
-  // Returns the count of (user, type) pairs touched.
+  // ─── Per-employee leave-type configs (v3) ────────────────────────────────
+  // Current = the row with effectiveTo IS NULL.
+  // Editing closes the current row and inserts a new one to preserve history.
+
+  async getCurrentConfig(userId: string, leaveTypeCode: string, asOf: Date = new Date()): Promise<EmployeeLeaveTypeConfig | null> {
+    const asOfYmd = asOf.toISOString().slice(0, 10);
+    const [row] = await db.select().from(employeeLeaveTypeConfigs)
+      .where(and(
+        eq(employeeLeaveTypeConfigs.userId, userId),
+        eq(employeeLeaveTypeConfigs.leaveTypeCode, leaveTypeCode),
+        lte(employeeLeaveTypeConfigs.effectiveFrom, asOfYmd),
+        or(
+          isNull(employeeLeaveTypeConfigs.effectiveTo),
+          gte(employeeLeaveTypeConfigs.effectiveTo, asOfYmd),
+        ),
+      ))
+      .orderBy(desc(employeeLeaveTypeConfigs.effectiveFrom))
+      .limit(1);
+    return row ?? null;
+  }
+
+  async getAllCurrentConfigsByUser(userId: string): Promise<EmployeeLeaveTypeConfig[]> {
+    return await db.select().from(employeeLeaveTypeConfigs)
+      .where(and(
+        eq(employeeLeaveTypeConfigs.userId, userId),
+        isNull(employeeLeaveTypeConfigs.effectiveTo),
+      ))
+      .orderBy(asc(employeeLeaveTypeConfigs.leaveTypeCode));
+  }
+
+  // Atomically close any current row for (user, type) and insert a new effective-today row.
+  async upsertConfig(input: {
+    userId: string; leaveTypeCode: string;
+    monthlyIncrement: number | null; annualAllowance: number | null; maxBalance: number | null;
+    notes?: string | null; createdBy?: string | null;
+  }): Promise<EmployeeLeaveTypeConfig> {
+    const today = new Date().toISOString().slice(0, 10);
+    const yesterday = (() => {
+      const d = new Date();
+      d.setDate(d.getDate() - 1);
+      return d.toISOString().slice(0, 10);
+    })();
+
+    // Close any currently-open row
+    await db.update(employeeLeaveTypeConfigs)
+      .set({ effectiveTo: yesterday })
+      .where(and(
+        eq(employeeLeaveTypeConfigs.userId, input.userId),
+        eq(employeeLeaveTypeConfigs.leaveTypeCode, input.leaveTypeCode),
+        isNull(employeeLeaveTypeConfigs.effectiveTo),
+      ));
+
+    const [created] = await db.insert(employeeLeaveTypeConfigs).values({
+      userId: input.userId,
+      leaveTypeCode: input.leaveTypeCode,
+      monthlyIncrement: input.monthlyIncrement === null ? null : String(input.monthlyIncrement),
+      annualAllowance: input.annualAllowance === null ? null : String(input.annualAllowance),
+      maxBalance: input.maxBalance === null ? null : String(input.maxBalance),
+      effectiveFrom: today,
+      effectiveTo: null,
+      notes: input.notes ?? null,
+      createdBy: input.createdBy ?? null,
+    } as InsertEmployeeLeaveTypeConfig).returning();
+    return created;
+  }
+
+  // ─── Monthly Accrual (v3: strategy dispatcher) ───────────────────────────
+  // Caller MUST hold an accrual_runs row (idempotency).
+  // Each leaveType.accrualStrategy maps to one of the apply* methods below.
   async runMonthlyLeaveAccrual(year: number, runId: string, asOf: Date = new Date()): Promise<number> {
     const types = await this.getActiveLeaveTypes();
     const activeUsers = await db.select().from(users).where(eq(users.isArchived, false));
-    const overrides = await db.select().from(employeeLeaveAccrualOverrides);
-    const overrideMap = new Map<string, number>();
-    for (const o of overrides) {
-      overrideMap.set(`${o.userId}|${o.leaveTypeCode}`, parseFloat(o.extraMonthlyAccrual));
-    }
 
     let touched = 0;
-
     for (const type of types) {
-      const baseRaw = type.accrualStrategy === "tenure_al" ? null : parseFloat(type.monthlyAccrual);
       for (const user of activeUsers) {
-        const base = baseRaw !== null ? baseRaw : alAccrualForUser(user.joinDate, asOf);
-        const extra = overrideMap.get(`${user.id}|${type.code}`) || 0;
-        const totalAdd = base + extra;
-        if (totalAdd === 0 && parseFloat(type.initialBalance) === 0) continue;
-
-        // Lazy-create or update the leave_balances row using SQL numeric arithmetic
-        const [existing] = await db.select().from(leaveBalances)
-          .where(and(
-            eq(leaveBalances.userId, user.id),
-            eq(leaveBalances.leaveType, type.code),
-            eq(leaveBalances.year, year),
-          ))
-          .limit(1);
-
-        if (!existing) {
-          // Lazy create — seed with initial_balance + this month's accrual
-          const initialBal = parseFloat(type.initialBalance);
-          await db.insert(leaveBalances).values({
-            userId: user.id,
-            employeeCode: user.employeeCode || null,
-            employeeName: user.name || null,
-            leaveType: type.code,
-            year,
-            broughtForward: type.initialBalance,
-            earned: String(totalAdd),
-            eligible: String(initialBal + totalAdd),
-            taken: "0",
-            balance: String(initialBal + totalAdd),
-          });
-          if (initialBal !== 0) {
-            await this.recordBalanceTransaction({
-              userId: user.id, leaveTypeCode: type.code, year,
-              delta: initialBal, source: "initial_seed", sourceRefId: runId,
-              notes: `Auto-seeded with ${type.label} initial balance`,
-            });
-          }
-        } else {
-          // Add base + extra in SQL — no JS float accumulation across runs
-          await db.update(leaveBalances)
-            .set({
-              earned: sql`(${leaveBalances.earned})::numeric + ${totalAdd}`,
-              balance: sql`(${leaveBalances.balance})::numeric + ${totalAdd}`,
-              eligible: sql`(${leaveBalances.eligible})::numeric + ${totalAdd}`,
-              updatedAt: new Date(),
-            })
-            .where(eq(leaveBalances.id, existing.id));
+        const config = await this.getCurrentConfig(user.id, type.code, asOf);
+        let delta = 0;
+        switch (type.accrualStrategy) {
+          case "monthly_fixed":
+            delta = await this.applyMonthlyFixed(user, type, config, year, runId);
+            break;
+          case "monthly_tenure":
+            delta = await this.applyMonthlyTenure(user, type, config, year, runId, asOf);
+            break;
+          case "annual_reset":
+            delta = await this.applyAnnualReset(user, type, config, year, runId, asOf);
+            break;
+          case "manual_only":
+          default:
+            delta = 0;
+            break;
         }
-
-        // Ledger entries (split base vs override for traceability)
-        if (base !== 0) {
-          await this.recordBalanceTransaction({
-            userId: user.id, leaveTypeCode: type.code, year,
-            delta: base, source: "monthly_accrual", sourceRefId: runId,
-            notes: type.accrualStrategy === "tenure_al" ? "AL tenure-scaled" : null,
-          });
-        }
-        if (extra !== 0) {
-          await this.recordBalanceTransaction({
-            userId: user.id, leaveTypeCode: type.code, year,
-            delta: extra, source: "override_accrual", sourceRefId: runId,
-            notes: "Per-employee override",
-          });
-        }
-
-        touched++;
+        if (delta !== 0) touched++;
       }
     }
     return touched;
   }
+
+  // Strategy: monthly_fixed — add config.monthlyIncrement ?? type.monthlyAccrual, capped at maxBalance.
+  private async applyMonthlyFixed(
+    user: typeof users.$inferSelect,
+    type: any,
+    config: EmployeeLeaveTypeConfig | null,
+    year: number,
+    runId: string,
+  ): Promise<number> {
+    const baseIncrement = config?.monthlyIncrement != null
+      ? parseFloat(config.monthlyIncrement)
+      : parseFloat(type.monthlyAccrual);
+    if (baseIncrement <= 0) return 0;
+    return await this.applyAccrualDelta(user, type, config, year, runId, baseIncrement, "monthly_accrual", "monthly_fixed");
+  }
+
+  // Strategy: monthly_tenure — compute monthly add from joinDate (7→14/yr), capped at maxBalance.
+  private async applyMonthlyTenure(
+    user: typeof users.$inferSelect,
+    type: any,
+    config: EmployeeLeaveTypeConfig | null,
+    year: number,
+    runId: string,
+    asOf: Date,
+  ): Promise<number> {
+    const baseIncrement = alAccrualForUser(user.joinDate, asOf);
+    if (baseIncrement <= 0) return 0;
+    return await this.applyAccrualDelta(user, type, config, year, runId, baseIncrement, "monthly_accrual", "monthly_tenure");
+  }
+
+  // Strategy: annual_reset — only acts in January. Sets balance to annualAllowance.
+  private async applyAnnualReset(
+    user: typeof users.$inferSelect,
+    type: any,
+    config: EmployeeLeaveTypeConfig | null,
+    year: number,
+    runId: string,
+    asOf: Date,
+  ): Promise<number> {
+    if (asOf.getMonth() !== 0) return 0;  // 0 = January; no-op other months
+    const allowance = config?.annualAllowance != null
+      ? parseFloat(config.annualAllowance)
+      : parseFloat(type.initialBalance);
+    if (allowance <= 0) return 0;
+
+    const [existing] = await db.select().from(leaveBalances)
+      .where(and(
+        eq(leaveBalances.userId, user.id),
+        eq(leaveBalances.leaveType, type.code),
+        eq(leaveBalances.year, year),
+      ))
+      .limit(1);
+
+    const previousBalance = existing ? parseFloat(existing.balance || "0") : 0;
+    const delta = roundLeave(allowance - previousBalance);
+
+    if (!existing) {
+      await db.insert(leaveBalances).values({
+        userId: user.id,
+        employeeCode: user.employeeCode || null,
+        employeeName: user.name || null,
+        leaveType: type.code,
+        year,
+        broughtForward: "0",
+        earned: String(roundLeave(allowance)),
+        eligible: String(roundLeave(allowance)),
+        taken: "0",
+        balance: String(roundLeave(allowance)),
+      });
+    } else {
+      await db.update(leaveBalances)
+        .set({
+          balance: String(roundLeave(allowance)),
+          eligible: String(roundLeave(allowance)),
+          earned: String(roundLeave(allowance)),
+          taken: "0",
+          updatedAt: new Date(),
+        })
+        .where(eq(leaveBalances.id, existing.id));
+    }
+
+    await this.recordBalanceTransaction({
+      userId: user.id, leaveTypeCode: type.code, year,
+      delta, source: "annual_reset", sourceRefId: runId,
+      notes: `Annual reset to ${allowance}`,
+    });
+    return delta;
+  }
+
+  // Shared logic for monthly_fixed and monthly_tenure: cap and write.
+  private async applyAccrualDelta(
+    user: typeof users.$inferSelect,
+    type: any,
+    config: EmployeeLeaveTypeConfig | null,
+    year: number,
+    runId: string,
+    proposedIncrement: number,
+    source: string,
+    strategyName: string,
+  ): Promise<number> {
+    // Read current balance
+    const [existing] = await db.select().from(leaveBalances)
+      .where(and(
+        eq(leaveBalances.userId, user.id),
+        eq(leaveBalances.leaveType, type.code),
+        eq(leaveBalances.year, year),
+      ))
+      .limit(1);
+
+    const currentBalance = existing ? parseFloat(existing.balance || "0") : 0;
+    const cap = config?.maxBalance != null ? parseFloat(config.maxBalance) : null;
+
+    // Apply cap
+    let delta = proposedIncrement;
+    let capApplied = false;
+    if (cap != null) {
+      const room = cap - currentBalance;
+      if (room <= 0) { delta = 0; capApplied = true; }
+      else if (proposedIncrement > room) { delta = room; capApplied = true; }
+    }
+    delta = roundLeave(delta);
+    if (delta <= 0) return 0;
+
+    // Lazy create or update
+    if (!existing) {
+      const initialBal = parseFloat(type.initialBalance);
+      const earned = roundLeave(initialBal + delta);
+      await db.insert(leaveBalances).values({
+        userId: user.id,
+        employeeCode: user.employeeCode || null,
+        employeeName: user.name || null,
+        leaveType: type.code,
+        year,
+        broughtForward: String(initialBal),
+        earned: String(earned),
+        eligible: String(earned),
+        taken: "0",
+        balance: String(earned),
+      });
+      if (initialBal !== 0) {
+        await this.recordBalanceTransaction({
+          userId: user.id, leaveTypeCode: type.code, year,
+          delta: initialBal, source: "initial_seed", sourceRefId: runId,
+          notes: `Lazy-seeded with ${type.label} initial balance`,
+        });
+      }
+    } else {
+      await db.update(leaveBalances)
+        .set({
+          earned: sql`(${leaveBalances.earned})::numeric + ${delta}`,
+          balance: sql`(${leaveBalances.balance})::numeric + ${delta}`,
+          eligible: sql`(${leaveBalances.eligible})::numeric + ${delta}`,
+          updatedAt: new Date(),
+        })
+        .where(eq(leaveBalances.id, existing.id));
+    }
+
+    await this.recordBalanceTransaction({
+      userId: user.id, leaveTypeCode: type.code, year,
+      delta, source, sourceRefId: runId,
+      notes: `${strategyName}${capApplied ? " (capped)" : ""}`,
+    });
+    return delta;
+  }
+}
+
+// ─── Helper: round leave numbers to 2 decimals to bound float drift ────────
+export function roundLeave(n: number): number {
+  return Math.round(n * 100) / 100;
 }
 
 // ─── Helper: AL tenure-based monthly accrual ──────────────────────────────

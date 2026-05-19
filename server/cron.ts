@@ -106,14 +106,16 @@ function scheduleNextMonthlyPayrollRun(): void {
 }
 
 // ---------------------------------------------------------------------------
-// Monthly: accrue then clamp (1st at 00:05 SGT) — idempotent via leave_accrual_runs
+// Monthly: clamp then accrue (1st at 00:05 SGT) — idempotent via leave_accrual_runs
 // ---------------------------------------------------------------------------
-// 1. Accrue: add base monthly + per-employee override to each (user × active type)
-// 2. Clamp: any remaining negatives are set to 0 so the next cycle starts fresh
+// 1. Clamp: any negatives reset to 0 — fresh start each month.
+// 2. Accrue: strategy dispatcher adds per-(user × active type) based on accrualStrategy.
+// Order rationale: clamp-then-accrue means -2 + 1 = 1 (employee gets exactly the
+// configured increment) rather than -2 + 1 = -1 → 0 (which would silently grant 2 days).
 // The leave_accrual_runs table prevents double-application within the same month
 // even if the server restarts or someone triggers manually.
 
-async function monthlyLeaveJob(triggeredBy: string): Promise<void> {
+export async function monthlyLeaveJob(triggeredBy: string): Promise<void> {
   try {
     const sgNow = getSingaporeNow();
     const year = sgNow.getFullYear();
@@ -132,15 +134,15 @@ async function monthlyLeaveJob(triggeredBy: string): Promise<void> {
     }
 
     try {
-      const touched = await storage.runMonthlyLeaveAccrual(year, run.id, sgNow);
       const cleared = await storage.clampNegativeLeaveBalances();
+      const touched = await storage.runMonthlyLeaveAccrual(year, run.id, sgNow);
       await storage.completeAccrualRun(run.id, touched);
       console.log(JSON.stringify({
         job: "monthlyLeaveJob",
         triggeredBy,
         year, month,
-        rowsTouched: touched,
         negativesCleared: cleared,
+        rowsTouched: touched,
         timestamp: new Date().toISOString(),
       }));
     } catch (innerErr) {
