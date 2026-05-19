@@ -1518,7 +1518,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         annualAllowance: null,
         maxBalance: resolvedMax,
         notes: "Edited via Team Snapshot AL Settings",
-        createdBy: req.session.userId ?? null,
+        // Master admin uses sentinel string "admin" which is NOT a users.id UUID — null it out to avoid FK violation
+        createdBy: (req.session.userId && req.session.userId !== "admin") ? req.session.userId : null,
       });
 
       res.json({ success: true });
@@ -1558,7 +1559,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         annualAllowance: data.annualAllowance ?? null,
         maxBalance: data.maxBalance ?? null,
         notes: data.notes ?? null,
-        createdBy: req.session.userId ?? null,
+        // Master admin uses sentinel string "admin" which is NOT a users.id UUID — null it out to avoid FK violation
+        createdBy: (req.session.userId && req.session.userId !== "admin") ? req.session.userId : null,
       });
       res.json({ success: true, config: created });
     } catch (error: any) {
