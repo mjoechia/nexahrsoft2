@@ -73,7 +73,7 @@ export default function AdminLeavePage() {
   }, [selectedApplication]);
 
   // ─── Data ────────────────────────────────────────────────────────────
-  const { data: usersData } = useQuery<{ users: User[] }>({
+  const { data: usersData } = useQuery<User[] | { users: User[] }>({
     queryKey: ["/api/admin/users"],
   });
   const { data: balancesData, isLoading: balancesLoading } = useQuery<{ balances: LeaveBalance[] }>({
@@ -90,7 +90,11 @@ export default function AdminLeavePage() {
   });
   const isViewOnlyAdmin = sessionData?.isViewOnlyAdmin === true;
 
-  const users = (usersData?.users || []).filter(u => u.isApproved && !u.isArchived && !u.role?.includes("admin"));
+  // Server returns bare array; older code expected { users: [] } — accept either shape.
+  const allUsers: User[] = Array.isArray(usersData) ? usersData : (usersData?.users || []);
+  // Filtered list for selects / snapshot rows (excludes admins, archived, unapproved).
+  // For NAME LOOKUPS use `allUsers` instead so applicants are never shown as "Unknown".
+  const users = allUsers.filter(u => u.isApproved && !u.isArchived && !u.role?.includes("admin"));
   const balances = balancesData?.balances || [];
   const applications = applicationsData?.applications || [];
   const leaveTypeOptions = leaveTypesData?.leaveTypes || [];
@@ -153,7 +157,7 @@ export default function AdminLeavePage() {
 
   // ─── Helpers ─────────────────────────────────────────────────────────
   const getUserName = (userId: string) => {
-    const u = users.find(x => x.id === userId);
+    const u = allUsers.find(x => x.id === userId);
     return toTitleCase(u?.name) || u?.username || "Unknown";
   };
 
