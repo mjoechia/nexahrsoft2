@@ -54,6 +54,7 @@ export default function AdminLeavePage() {
   // Dialog state
   const [balanceDialogOpen, setBalanceDialogOpen] = useState(false);
   const [reviewDialogOpen, setReviewDialogOpen] = useState(false);
+  const [pendingQueueOpen, setPendingQueueOpen] = useState(false);
 
   // Set Balance form state
   const [selectedUserId, setSelectedUserId] = useState("");
@@ -379,9 +380,11 @@ export default function AdminLeavePage() {
           icon={<AlertOctagon className="h-5 w-5" />}
           ctaLabel="Review"
           onCta={() => {
-            const first = pendingApplications[0];
-            if (first) openReview(first);
-            else toast({ title: "No pending applications" });
+            if (pendingApplications.length === 0) {
+              toast({ title: "No pending applications" });
+            } else {
+              setPendingQueueOpen(true);
+            }
           }}
           loading={applicationsLoading}
         />
@@ -561,6 +564,71 @@ export default function AdminLeavePage() {
           </div>
         )}
       </Card>
+
+      {/* ─── Pending Queue Dialog ─── */}
+      <Dialog open={pendingQueueOpen} onOpenChange={setPendingQueueOpen}>
+        <DialogContent className="sm:max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              Pending Leave Applications ({pendingApplications.length})
+            </DialogTitle>
+          </DialogHeader>
+          {pendingApplications.length === 0 ? (
+            <div className="py-8 text-center text-sm text-muted-foreground">
+              No pending applications.
+            </div>
+          ) : (
+            <div className="divide-y">
+              {[...pendingApplications]
+                .sort((a, b) => new Date(a.createdAt as any).getTime() - new Date(b.createdAt as any).getTime())
+                .map(app => (
+                  <div
+                    key={app.id}
+                    className="py-3 flex items-center justify-between gap-3"
+                    data-testid={`queue-row-${app.id}`}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="text-sm font-semibold truncate">
+                          {getUserName(app.userId)}
+                        </p>
+                        <Badge variant="secondary">{app.leaveType}</Badge>
+                        {app.leaveType === "MC" && app.submissionTiming && (
+                          <Badge variant="outline">
+                            {app.submissionTiming === "pre_event" ? "Planned" : "Post-event"}
+                          </Badge>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {new Date(app.startDate).toLocaleDateString("en-SG", { day: "numeric", month: "short" })}
+                        {" – "}
+                        {new Date(app.endDate).toLocaleDateString("en-SG", { day: "numeric", month: "short", year: "numeric" })}
+                        {" · "}
+                        {app.totalDays} day{parseFloat(String(app.totalDays)) === 1 ? "" : "s"}
+                        {app.createdAt && ` · Submitted ${timeAgo(app.createdAt as any)}`}
+                      </p>
+                      {app.reason && (
+                        <p className="text-xs text-muted-foreground mt-1 line-clamp-1">
+                          {app.reason}
+                        </p>
+                      )}
+                    </div>
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        setPendingQueueOpen(false);
+                        openReview(app);
+                      }}
+                      data-testid={`button-queue-review-${app.id}`}
+                    >
+                      Review
+                    </Button>
+                  </div>
+                ))}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* ─── Review Dialog (preserved from previous version) ─── */}
       <Dialog open={reviewDialogOpen} onOpenChange={setReviewDialogOpen}>
