@@ -429,8 +429,18 @@ export default function AdminLeavePage() {
 
   // Fetch the user's full configs array once (cached by React Query).
   // Picking a leave type then derives the right config locally — no per-type fetches.
+  // NOTE: explicit queryFn is required — the default query function concatenates string
+  // keys with no separator, which would hit /api/admin/users<UUID>leave-configs (404).
   const { data: userConfigsData } = useQuery<{ configs: EmployeeLeaveTypeConfig[] }>({
     queryKey: ["/api/admin/users", selectedUserId, "leave-configs"],
+    queryFn: async () => {
+      if (!selectedUserId) return { configs: [] };
+      const res = await fetch(`/api/admin/users/${selectedUserId}/leave-configs`, {
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error(`Failed to load leave configs (${res.status})`);
+      return res.json();
+    },
     enabled: !!selectedUserId,
   });
   const userConfigs = useMemo(() => userConfigsData?.configs || [], [userConfigsData]);
@@ -607,6 +617,26 @@ export default function AdminLeavePage() {
                     </div>
                     {/* Max Balance field removed — Annual Allowance now serves as both the reset value and the cap */}
                   </div>
+                  <Button type="button" variant="outline" size="sm" className="w-full"
+                    onClick={() => {
+                      const annual = parseFloat(cfgAnnualAllowance);
+                      if (!annual || annual <= 0) {
+                        toast({ title: "Set Annual Allowance first", description: "Enter a positive value before granting.", variant: "destructive" });
+                        return;
+                      }
+                      // Grant the full annual allowance as Earned for this year. Recompute Eligible
+                      // and Balance from BF + Earned − Taken so admins still see the components.
+                      setEarnedDays(String(annual));
+                      const bf = parseFloat(bfDays) || 0;
+                      const taken = parseFloat(takenDays) || 0;
+                      const eligible = bf + annual;
+                      setEligibleDays(String(eligible));
+                      setBalanceDays(String(eligible - taken));
+                      toast({ title: "Balance fields updated", description: `Earned set to ${annual.toFixed(1)}. Review and Save.` });
+                    }}
+                    data-testid="button-grant-annual">
+                    Grant annual allowance as current balance now
+                  </Button>
                   <p className="text-xs text-muted-foreground">
                     Leave a field blank to inherit the leave-type default.
                   </p>
