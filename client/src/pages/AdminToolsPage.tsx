@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
-import { ArrowLeft, FileText, Download, Save, Loader2, Megaphone, Tag } from "lucide-react";
+import { ArrowLeft, FileText, Download, Save, Loader2, Megaphone, Tag, HelpCircle } from "lucide-react";
 import { useLocation } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -17,6 +17,7 @@ import html2pdf from "html2pdf.js";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AnnouncementsManager } from "@/components/AnnouncementsManager";
 import { LeaveTypesManager } from "@/components/LeaveTypesManager";
+import { FaqManager } from "@/components/FaqManager";
 
 interface PayslipFormData {
   employeeName: string;
@@ -284,6 +285,10 @@ export default function AdminToolsPage() {
             <TabsTrigger value="leave-types" data-testid="tab-leave-types">
               <Tag className="h-4 w-4 mr-2" />
               Leave Types
+            </TabsTrigger>
+            <TabsTrigger value="faq" data-testid="tab-faq">
+              <HelpCircle className="h-4 w-4 mr-2" />
+              FAQ
             </TabsTrigger>
           </TabsList>
 
@@ -924,6 +929,10 @@ export default function AdminToolsPage() {
 
           <TabsContent value="leave-types">
             <LeaveTypesManager />
+          </TabsContent>
+
+          <TabsContent value="faq">
+            <FaqManager />
           </TabsContent>
         </Tabs>
       </div>

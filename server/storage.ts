@@ -1,9 +1,9 @@
 import { type User, type InsertUser, type CompanySettings, type AttendanceRecord, type InsertAttendanceRecord, type UserSession, type InsertUserSession, type LoginChallenge, type InsertLoginChallenge, type PayslipRecord, type InsertPayslipRecord, type LeaveBalance, type InsertLeaveBalance, type LeaveApplication, type InsertLeaveApplication, type EmailLog, type InsertEmailLog, type AuditLog, type InsertAuditLog, type PasswordOverrideLog, type InsertPasswordOverrideLog, type PayrollRecord, type InsertPayrollRecord, type LeaveHistory, type InsertLeaveHistory, type LeaveAuditLog, type InsertLeaveAuditLog, type PayrollLoanAccount, type InsertPayrollLoanAccount, type PayrollLoanRepayment, type InsertPayrollLoanRepayment, type PayrollAuditLog, type InsertPayrollAuditLog, type DailyAttendanceSummary, type InsertDailyAttendanceSummary, type PayrollAdjustment, type InsertPayrollAdjustment, type PayrollAdjustmentAuditLog, type InsertPayrollAdjustmentAuditLog, type EmployeeSalaryAdjustment, type InsertEmployeeSalaryAdjustment, type AttendanceAdjustment, type InsertAttendanceAdjustment, type EmployeeMonthlyRemark, type InsertEmployeeMonthlyRemark, type EmployeeDataAuditLog, type InsertEmployeeDataAuditLog, type PayrollImportBatch, type InsertPayrollImportBatch, type ManualPayslip, type InsertManualPayslip, type ManualPayslipAuditLog, type InsertManualPayslipAuditLog, type Claim, type InsertClaim, type EmployeeDocument, type InsertEmployeeDocument } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { db } from "./db";
-import { users, companySettings, attendanceRecords, userSessions, loginChallenges, payslipRecords, leaveBalances, leaveApplications, emailLogs, auditLogs, passwordOverrideLogs, payrollRecords, leaveHistory, leaveAuditLogs, payrollLoanAccounts, payrollLoanRepayments, payrollAuditLogs, dailyAttendanceSummary, payrollAdjustments, payrollAdjustmentAuditLogs, employeeSalaryAdjustments, attendanceAdjustments, employeeMonthlyRemarks, employeeDataAuditLogs, payrollImportBatches, manualPayslips, manualPayslipAuditLogs, claims, claimsAuditLog, employeeDocuments, announcements, leaveTypesTable, employeeLeaveAccrualOverrides, leaveAccrualRuns, leaveBalanceTransactions, employeeLeaveTypeConfigs } from "@shared/schema";
+import { users, companySettings, attendanceRecords, userSessions, loginChallenges, payslipRecords, leaveBalances, leaveApplications, emailLogs, auditLogs, passwordOverrideLogs, payrollRecords, leaveHistory, leaveAuditLogs, payrollLoanAccounts, payrollLoanRepayments, payrollAuditLogs, dailyAttendanceSummary, payrollAdjustments, payrollAdjustmentAuditLogs, employeeSalaryAdjustments, attendanceAdjustments, employeeMonthlyRemarks, employeeDataAuditLogs, payrollImportBatches, manualPayslips, manualPayslipAuditLogs, claims, claimsAuditLog, employeeDocuments, announcements, leaveTypesTable, employeeLeaveAccrualOverrides, leaveAccrualRuns, leaveBalanceTransactions, employeeLeaveTypeConfigs, faqCategories, faqEntries, faqEntryImages } from "@shared/schema";
 import type { EmployeeLeaveTypeConfig, InsertEmployeeLeaveTypeConfig } from "@shared/schema";
-import type { Announcement, InsertAnnouncement, LeaveTypeRow, InsertLeaveType, EmployeeLeaveAccrualOverride, InsertEmployeeLeaveAccrualOverride, LeaveAccrualRun, LeaveBalanceTransaction } from "@shared/schema";
+import type { Announcement, InsertAnnouncement, LeaveTypeRow, InsertLeaveType, EmployeeLeaveAccrualOverride, InsertEmployeeLeaveAccrualOverride, LeaveAccrualRun, LeaveBalanceTransaction, FaqCategory, InsertFaqCategory, FaqEntry, InsertFaqEntry, FaqEntryImage, InsertFaqEntryImage, FaqAudience } from "@shared/schema";
 import { eq, or, and, gte, lte, lt, desc, asc, isNull, not, like, sql, inArray } from "drizzle-orm";
 
 // modify the interface with any CRUD methods
@@ -2883,6 +2883,95 @@ export class PgStorage implements IStorage {
       notes: `${strategyName}${capApplied ? " (capped)" : ""}`,
     });
     return delta;
+  }
+
+  // ─── FAQ ─────────────────────────────────────────────────────────────────
+  async getFaqCategories(opts: { activeOnly?: boolean } = {}): Promise<FaqCategory[]> {
+    const rows = await db.select().from(faqCategories).orderBy(asc(faqCategories.sortOrder), asc(faqCategories.name));
+    return opts.activeOnly ? rows.filter(r => r.isActive) : rows;
+  }
+
+  async getFaqCategoryBySlug(slug: string): Promise<FaqCategory | undefined> {
+    const [row] = await db.select().from(faqCategories).where(eq(faqCategories.slug, slug));
+    return row;
+  }
+
+  async createFaqCategory(data: InsertFaqCategory): Promise<FaqCategory> {
+    const [created] = await db.insert(faqCategories).values(data).returning();
+    return created;
+  }
+
+  async updateFaqCategory(id: string, updates: Partial<InsertFaqCategory>): Promise<FaqCategory | undefined> {
+    const [updated] = await db.update(faqCategories)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(faqCategories.id, id))
+      .returning();
+    return updated;
+  }
+
+  async deleteFaqCategory(id: string): Promise<void> {
+    await db.delete(faqCategories).where(eq(faqCategories.id, id));
+  }
+
+  async getFaqEntries(opts: { categoryId?: string; audience?: FaqAudience | "all"; activeOnly?: boolean } = {}): Promise<FaqEntry[]> {
+    const conds: any[] = [];
+    if (opts.categoryId) conds.push(eq(faqEntries.categoryId, opts.categoryId));
+    if (opts.activeOnly) conds.push(eq(faqEntries.isActive, true));
+    if (opts.audience && opts.audience !== "all") {
+      // employee/admin both see entries marked "both"; "admin" param sees admin+both, "employee" sees employee+both
+      conds.push(inArray(faqEntries.audience, [opts.audience, "both"]));
+    }
+    const where = conds.length === 0 ? undefined : (conds.length === 1 ? conds[0] : and(...conds));
+    const q = db.select().from(faqEntries).orderBy(asc(faqEntries.sortOrder), asc(faqEntries.createdAt));
+    return where ? await q.where(where) : await q;
+  }
+
+  async getFaqEntry(id: string): Promise<FaqEntry | undefined> {
+    const [row] = await db.select().from(faqEntries).where(eq(faqEntries.id, id));
+    return row;
+  }
+
+  async createFaqEntry(data: InsertFaqEntry): Promise<FaqEntry> {
+    const [created] = await db.insert(faqEntries).values(data).returning();
+    return created;
+  }
+
+  async updateFaqEntry(id: string, updates: Partial<InsertFaqEntry>): Promise<FaqEntry | undefined> {
+    const [updated] = await db.update(faqEntries)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(faqEntries.id, id))
+      .returning();
+    return updated;
+  }
+
+  async deleteFaqEntry(id: string): Promise<void> {
+    await db.delete(faqEntries).where(eq(faqEntries.id, id));
+  }
+
+  async getFaqImagesForEntries(entryIds: string[]): Promise<FaqEntryImage[]> {
+    if (entryIds.length === 0) return [];
+    return await db.select()
+      .from(faqEntryImages)
+      .where(inArray(faqEntryImages.entryId, entryIds))
+      .orderBy(asc(faqEntryImages.sortOrder), asc(faqEntryImages.createdAt));
+  }
+
+  async addFaqImage(data: InsertFaqEntryImage): Promise<FaqEntryImage> {
+    const [created] = await db.insert(faqEntryImages).values(data).returning();
+    return created;
+  }
+
+  async updateFaqImage(id: string, updates: Partial<InsertFaqEntryImage>): Promise<FaqEntryImage | undefined> {
+    const [updated] = await db.update(faqEntryImages)
+      .set(updates)
+      .where(eq(faqEntryImages.id, id))
+      .returning();
+    return updated;
+  }
+
+  async deleteFaqImage(id: string): Promise<FaqEntryImage | undefined> {
+    const [removed] = await db.delete(faqEntryImages).where(eq(faqEntryImages.id, id)).returning();
+    return removed;
   }
 }
 

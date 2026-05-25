@@ -238,6 +238,129 @@ async function seedDefaultUser() {
   }
 }
 
+// One-time seed for the FAQ system. Creates the "Leave" category and starter
+// entries explaining the leave workflow. Idempotent — safe to call on every
+// startup; admins can edit/delete the seeded entries afterwards.
+async function seedDefaultFaq() {
+  try {
+    let leaveCat = await storage.getFaqCategoryBySlug("leave");
+    if (!leaveCat) {
+      console.log("Seeding default FAQ category 'leave'...");
+      leaveCat = await storage.createFaqCategory({
+        slug: "leave",
+        name: "Leave",
+        description: "How the leave system works — applying, balances, approvals, and configuration.",
+        sortOrder: 0,
+        isActive: true,
+      });
+    }
+
+    const existing = await storage.getFaqEntries({ categoryId: leaveCat.id });
+    if (existing.length > 0) return; // Already seeded
+
+    const starterEntries: Array<{ title: string; body: string; audience: "admin" | "employee" | "both" }> = [
+      {
+        title: "How do I apply for leave?",
+        audience: "employee",
+        body:
+`1. Go to the **Leave** page from the side navigation.
+2. Click **Apply Leave** in the top-right.
+3. Pick a leave type (AL, MC, CL, OIL, etc.), start and end dates.
+4. Choose Full day or Half day. Half-day applications count as 0.5 days.
+5. Enter a reason and submit. For Medical Leave (MC) you can attach a doctor's certificate; for claim-related receipts you can attach the receipt file.
+6. Your application appears under **Recent Leave Applications** with a Pending badge until an admin reviews it.`,
+      },
+      {
+        title: "Where do I see my leave balance?",
+        audience: "employee",
+        body:
+`The cards at the top of the Leave page show your remaining balance for each leave type.
+
+- **Eligible** = how much you have earned this year so far.
+- **Taken** = approved leave already used.
+- **Balance** = Eligible minus Taken.
+
+Balances accrue monthly on the 1st (see the "How are leave balances calculated?" entry).`,
+      },
+      {
+        title: "How are leave balances calculated?",
+        audience: "both",
+        body:
+`Each leave type has an **accrual strategy** that decides how the balance grows:
+
+- **Monthly fixed** — adds the same amount every month (e.g., MC: 1.17 days).
+- **Monthly tenure** — uses the employee's joining date to derive the monthly increment (e.g., AL: starts at 7 days/year, +1 per completed year, capped at 14).
+- **Annual reset** — resets to a fixed allowance on 1 Jan.
+- **Manual only** — no automatic accrual; admin adjusts the balance directly.
+
+The monthly accrual cron runs on the 1st of each month and is idempotent (a ledger row guarantees it can't double-credit). Per-employee overrides on top of the type-level rule are added at accrual time.`,
+      },
+      {
+        title: "How do I approve or reject a leave request?",
+        audience: "admin",
+        body:
+`1. Open **Admin > Leave Management**.
+2. Pending requests show at the top with an amber Pending badge.
+3. Click **Approve** to credit Taken (and decrement Balance) atomically, or **Reject** to leave the balance unchanged.
+4. The action is recorded in **Leave Audit Logs** with your name, timestamp, and the prior/new values for traceability.
+
+Approving a request that exceeds the employee's remaining balance will block — adjust the balance first via **Adjust Balance** if you intend to grant unpaid leave.`,
+      },
+      {
+        title: "How do I adjust an employee's leave balance?",
+        audience: "admin",
+        body:
+`From **Admin > Leave Management**, find the employee row and click **Adjust** on the leave type you want to change.
+
+The dialog prefills the current values and lets you edit:
+- **Brought Forward** — carry-over from the previous year
+- **Earned** — total accrued this year (rarely edited)
+- **Eligible** — Brought Forward + Earned
+- **Taken** — approved leave used this year
+- **Balance** — auto-calculated
+
+A reason is required; the change writes a row to the leave audit log and a balance-transaction ledger entry tagged as \`admin_adjustment\`.`,
+      },
+      {
+        title: "How do I add or configure a leave type?",
+        audience: "admin",
+        body:
+`Open **Admin > Tools > Leave Types**. From there you can:
+
+- **Create a new type** — pick a short code (e.g., HDL), label, accrual strategy, initial balance, and monthly accrual rate.
+- **Edit an existing type** — change the label, accrual rate, or sort order. The code is immutable.
+- **Deactivate** — hides the type from new applications without deleting historical data.
+
+Per-employee overrides (extra monthly accrual on top of the type's base) live in the same area.`,
+      },
+      {
+        title: "What happens if my application overlaps an existing one?",
+        audience: "employee",
+        body:
+`The system blocks overlapping date ranges for the same employee. If you need to amend an existing request, ask your admin to reject it first and then submit a fresh application with the corrected dates.`,
+      },
+    ];
+
+    const masterAdminId: string | null = null; // seeded entries have no specific creator
+    for (let i = 0; i < starterEntries.length; i++) {
+      const e = starterEntries[i];
+      await storage.createFaqEntry({
+        categoryId: leaveCat.id,
+        title: e.title,
+        body: e.body,
+        audience: e.audience,
+        sortOrder: i,
+        isActive: true,
+        createdBy: masterAdminId,
+        createdByName: "System",
+      });
+    }
+    console.log(`Seeded ${starterEntries.length} FAQ entries under 'leave'.`);
+  } catch (error) {
+    console.error("Error seeding default FAQ:", error);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Auto-regenerate payroll when attendance adjustments change
 // ---------------------------------------------------------------------------
@@ -276,6 +399,8 @@ function triggerAutoPayrollRegen(date: string) {
 export async function registerRoutes(app: Express): Promise<Server> {
   // Seed default user on startup
   await seedDefaultUser();
+  // Seed the default FAQ category + starter entries
+  await seedDefaultFaq();
 
   // Admin login
   app.post("/api/admin/login", async (req: Request, res: Response) => {
@@ -8673,6 +8798,254 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Delete announcement error:", error);
       res.status(500).json({ message: "Failed to delete announcement" });
+    }
+  });
+
+  // ==================== FAQ ROUTES ====================
+
+  const faqAudienceSchema = z.enum(["admin", "employee", "both"]);
+
+  // Helper: shape FAQ entries with attached images for a response payload
+  async function shapeFaqEntries(entries: any[]) {
+    if (entries.length === 0) return [];
+    const images = await storage.getFaqImagesForEntries(entries.map((e: any) => e.id));
+    const byEntry = new Map<string, any[]>();
+    for (const img of images) {
+      if (!byEntry.has(img.entryId)) byEntry.set(img.entryId, []);
+      byEntry.get(img.entryId)!.push(img);
+    }
+    return entries.map((e: any) => ({ ...e, images: byEntry.get(e.id) || [] }));
+  }
+
+  // Public (any authenticated user): active entries for their audience
+  app.get("/api/faq", async (req: Request, res: Response) => {
+    if (!req.session?.userId) {
+      return res.status(401).json({ message: "Authentication required" });
+    }
+    try {
+      const isAdmin = !!req.session.isAdmin;
+      const categorySlug = typeof req.query.category === "string" ? req.query.category : undefined;
+      const categories = await storage.getFaqCategories({ activeOnly: true });
+      const visibleCats = categorySlug ? categories.filter(c => c.slug === categorySlug) : categories;
+      const result: any[] = [];
+      for (const cat of visibleCats) {
+        const entries = await storage.getFaqEntries({
+          categoryId: cat.id,
+          audience: isAdmin ? "admin" : "employee",
+          activeOnly: true,
+        });
+        result.push({ category: cat, entries: await shapeFaqEntries(entries) });
+      }
+      res.json({ groups: result });
+    } catch (error) {
+      console.error("Get faq error:", error);
+      res.status(500).json({ message: "Failed to fetch FAQ" });
+    }
+  });
+
+  // Admin: list all categories (active + inactive)
+  app.get("/api/admin/faq/categories", requireAdmin, async (_req: Request, res: Response) => {
+    try {
+      const categories = await storage.getFaqCategories({});
+      res.json({ categories });
+    } catch (error) {
+      console.error("Admin list faq categories error:", error);
+      res.status(500).json({ message: "Failed to fetch FAQ categories" });
+    }
+  });
+
+  // Admin: create category
+  app.post("/api/admin/faq/categories", requireAdmin, requireWriteAccess, requireFullAdmin, async (req: Request, res: Response) => {
+    try {
+      const schema = z.object({
+        slug: z.string().min(1).max(64).regex(/^[a-z0-9-]+$/, "Slug must be lowercase letters, digits, or dashes"),
+        name: z.string().min(1).max(120),
+        description: z.string().max(500).optional().nullable(),
+        sortOrder: z.number().int().optional().default(0),
+        isActive: z.boolean().optional().default(true),
+      });
+      const data = schema.parse(req.body);
+      const created = await storage.createFaqCategory({
+        slug: data.slug,
+        name: data.name,
+        description: data.description ?? null,
+        sortOrder: data.sortOrder,
+        isActive: data.isActive,
+      });
+      res.json({ success: true, category: created });
+    } catch (error: any) {
+      if (error?.code === "23505") {
+        return res.status(409).json({ message: "Category slug already exists" });
+      }
+      console.error("Create faq category error:", error);
+      res.status(500).json({ message: "Failed to create FAQ category" });
+    }
+  });
+
+  // Admin: update category
+  app.patch("/api/admin/faq/categories/:id", requireAdmin, requireWriteAccess, requireFullAdmin, async (req: Request, res: Response) => {
+    try {
+      const schema = z.object({
+        name: z.string().min(1).max(120).optional(),
+        description: z.string().max(500).nullable().optional(),
+        sortOrder: z.number().int().optional(),
+        isActive: z.boolean().optional(),
+      });
+      const data = schema.parse(req.body);
+      const updated = await storage.updateFaqCategory(req.params.id, data);
+      if (!updated) return res.status(404).json({ message: "FAQ category not found" });
+      res.json({ success: true, category: updated });
+    } catch (error) {
+      console.error("Update faq category error:", error);
+      res.status(500).json({ message: "Failed to update FAQ category" });
+    }
+  });
+
+  // Admin: delete category (cascades to entries + images)
+  app.delete("/api/admin/faq/categories/:id", requireAdmin, requireWriteAccess, requireFullAdmin, async (req: Request, res: Response) => {
+    try {
+      await storage.deleteFaqCategory(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Delete faq category error:", error);
+      res.status(500).json({ message: "Failed to delete FAQ category" });
+    }
+  });
+
+  // Admin: list entries for a category (active + inactive, with images)
+  app.get("/api/admin/faq/entries", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const categoryId = typeof req.query.categoryId === "string" ? req.query.categoryId : undefined;
+      const entries = await storage.getFaqEntries({ categoryId });
+      res.json({ entries: await shapeFaqEntries(entries) });
+    } catch (error) {
+      console.error("Admin list faq entries error:", error);
+      res.status(500).json({ message: "Failed to fetch FAQ entries" });
+    }
+  });
+
+  // Admin: create entry
+  app.post("/api/admin/faq/entries", requireAdmin, requireWriteAccess, requireFullAdmin, async (req: Request, res: Response) => {
+    try {
+      const schema = z.object({
+        categoryId: z.string().min(1),
+        title: z.string().min(1).max(200),
+        body: z.string().min(1).max(10000),
+        audience: faqAudienceSchema.optional().default("both"),
+        sortOrder: z.number().int().optional().default(0),
+        isActive: z.boolean().optional().default(true),
+      });
+      const data = schema.parse(req.body);
+      const adminId = req.session.userId!;
+      const adminUser = await storage.getUser(adminId);
+      const created = await storage.createFaqEntry({
+        categoryId: data.categoryId,
+        title: data.title,
+        body: data.body,
+        audience: data.audience,
+        sortOrder: data.sortOrder,
+        isActive: data.isActive,
+        createdBy: adminId,
+        createdByName: adminUser?.name || null,
+      });
+      res.json({ success: true, entry: created });
+    } catch (error) {
+      console.error("Create faq entry error:", error);
+      res.status(500).json({ message: "Failed to create FAQ entry" });
+    }
+  });
+
+  // Admin: update entry
+  app.patch("/api/admin/faq/entries/:id", requireAdmin, requireWriteAccess, requireFullAdmin, async (req: Request, res: Response) => {
+    try {
+      const schema = z.object({
+        title: z.string().min(1).max(200).optional(),
+        body: z.string().min(1).max(10000).optional(),
+        audience: faqAudienceSchema.optional(),
+        sortOrder: z.number().int().optional(),
+        isActive: z.boolean().optional(),
+      });
+      const data = schema.parse(req.body);
+      const updated = await storage.updateFaqEntry(req.params.id, data);
+      if (!updated) return res.status(404).json({ message: "FAQ entry not found" });
+      res.json({ success: true, entry: updated });
+    } catch (error) {
+      console.error("Update faq entry error:", error);
+      res.status(500).json({ message: "Failed to update FAQ entry" });
+    }
+  });
+
+  // Admin: delete entry (cascades to images)
+  app.delete("/api/admin/faq/entries/:id", requireAdmin, requireWriteAccess, requireFullAdmin, async (req: Request, res: Response) => {
+    try {
+      await storage.deleteFaqEntry(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Delete faq entry error:", error);
+      res.status(500).json({ message: "Failed to delete FAQ entry" });
+    }
+  });
+
+  // Admin: upload an image for an entry
+  app.post("/api/admin/faq/entries/:id/images", requireAdmin, requireWriteAccess, requireFullAdmin, upload.single("file"), async (req: Request, res: Response) => {
+    try {
+      if (!req.file) return res.status(400).json({ message: "No file uploaded" });
+      if (!/^image\/(png|jpeg|jpg|gif|webp)$/i.test(req.file.mimetype)) {
+        return res.status(400).json({ message: "Invalid file. Must be a PNG, JPEG, GIF, or WebP image under 5MB" });
+      }
+      if (req.file.size > 5 * 1024 * 1024) {
+        return res.status(400).json({ message: "File too large. Maximum 5MB" });
+      }
+      const entry = await storage.getFaqEntry(req.params.id);
+      if (!entry) return res.status(404).json({ message: "FAQ entry not found" });
+
+      const objectStorageService = new ObjectStorageService();
+      const imageUrl = await objectStorageService.uploadPublicFile(
+        req.file.buffer,
+        req.file.originalname,
+        req.file.mimetype,
+      );
+      const caption = typeof req.body.caption === "string" ? req.body.caption : null;
+      const existing = await storage.getFaqImagesForEntries([entry.id]);
+      const created = await storage.addFaqImage({
+        entryId: entry.id,
+        imageUrl,
+        caption,
+        sortOrder: existing.length,
+      });
+      res.json({ success: true, image: created });
+    } catch (error) {
+      console.error("Upload faq image error:", error);
+      res.status(500).json({ message: "Failed to upload image" });
+    }
+  });
+
+  // Admin: update image (caption / sort_order)
+  app.patch("/api/admin/faq/images/:id", requireAdmin, requireWriteAccess, requireFullAdmin, async (req: Request, res: Response) => {
+    try {
+      const schema = z.object({
+        caption: z.string().max(500).nullable().optional(),
+        sortOrder: z.number().int().optional(),
+      });
+      const data = schema.parse(req.body);
+      const updated = await storage.updateFaqImage(req.params.id, data);
+      if (!updated) return res.status(404).json({ message: "Image not found" });
+      res.json({ success: true, image: updated });
+    } catch (error) {
+      console.error("Update faq image error:", error);
+      res.status(500).json({ message: "Failed to update image" });
+    }
+  });
+
+  // Admin: delete image
+  app.delete("/api/admin/faq/images/:id", requireAdmin, requireWriteAccess, requireFullAdmin, async (req: Request, res: Response) => {
+    try {
+      const removed = await storage.deleteFaqImage(req.params.id);
+      if (!removed) return res.status(404).json({ message: "Image not found" });
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Delete faq image error:", error);
+      res.status(500).json({ message: "Failed to delete image" });
     }
   });
 

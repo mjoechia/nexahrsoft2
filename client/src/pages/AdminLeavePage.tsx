@@ -617,7 +617,7 @@ export default function AdminLeavePage() {
                     </div>
                     {/* Max Balance field removed — Annual Allowance now serves as both the reset value and the cap */}
                   </div>
-                  <Button type="button" variant="outline" size="sm" className="w-full"
+                  <Button type="button" variant="default" size="sm" className="w-full"
                     onClick={() => {
                       const annual = parseFloat(cfgAnnualAllowance);
                       if (!annual || annual <= 0) {

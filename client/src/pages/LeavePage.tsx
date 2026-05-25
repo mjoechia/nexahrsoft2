@@ -1,5 +1,6 @@
 import { useState, useRef } from "react";
-import { Calendar, Plus, Clock, Upload, FileText, X } from "lucide-react";
+import { Calendar, Plus, Clock, Upload, FileText, X, HelpCircle } from "lucide-react";
+import { FaqViewer } from "@/components/FaqViewer";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -499,6 +500,8 @@ export default function LeavePage() {
           )}
         </CardContent>
       </Card>
+
+      <FaqViewer categorySlug="leave" title="Leave — How it Works" icon={<HelpCircle className="h-5 w-5" />} />
     </div>
   );
 }

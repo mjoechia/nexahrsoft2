@@ -1164,3 +1164,66 @@ export const insertEmployeeLeaveTypeConfigSchema = createInsertSchema(employeeLe
 });
 export type InsertEmployeeLeaveTypeConfig = z.infer<typeof insertEmployeeLeaveTypeConfigSchema>;
 export type EmployeeLeaveTypeConfig = typeof employeeLeaveTypeConfigs.$inferSelect;
+
+// ─── FAQ (Tools > FAQ) ─────────────────────────────────────────────────────
+// Admin-authored knowledge base entries grouped by category (e.g., "leave",
+// "payroll"). Each entry has a title, body, audience (admin/employee/both),
+// and zero or more screenshots stored in object storage.
+export const faqAudiences = ["admin", "employee", "both"] as const;
+export type FaqAudience = (typeof faqAudiences)[number];
+
+export const faqCategories = appSchema.table("faq_categories", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  slug: text("slug").notNull().unique(),     // 'leave', 'payroll', 'attendance', ...
+  name: text("name").notNull(),              // 'Leave', 'Payroll', ...
+  description: text("description"),
+  sortOrder: integer("sort_order").notNull().default(0),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertFaqCategorySchema = createInsertSchema(faqCategories).omit({
+  id: true, createdAt: true, updatedAt: true,
+});
+export type InsertFaqCategory = z.infer<typeof insertFaqCategorySchema>;
+export type FaqCategory = typeof faqCategories.$inferSelect;
+
+export const faqEntries = appSchema.table("faq_entries", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  categoryId: varchar("category_id").notNull().references(() => faqCategories.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  body: text("body").notNull(),              // plain text / markdown-ish
+  audience: text("audience").notNull().default("both"), // 'admin' | 'employee' | 'both'
+  sortOrder: integer("sort_order").notNull().default(0),
+  isActive: boolean("is_active").notNull().default(true),
+  createdBy: varchar("created_by").references(() => users.id),
+  createdByName: text("created_by_name"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => ({
+  byCategory: index("faq_entries_category_idx").on(t.categoryId, t.sortOrder),
+}));
+
+export const insertFaqEntrySchema = createInsertSchema(faqEntries).omit({
+  id: true, createdAt: true, updatedAt: true,
+});
+export type InsertFaqEntry = z.infer<typeof insertFaqEntrySchema>;
+export type FaqEntry = typeof faqEntries.$inferSelect;
+
+export const faqEntryImages = appSchema.table("faq_entry_images", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  entryId: varchar("entry_id").notNull().references(() => faqEntries.id, { onDelete: "cascade" }),
+  imageUrl: text("image_url").notNull(),
+  caption: text("caption"),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => ({
+  byEntry: index("faq_entry_images_entry_idx").on(t.entryId, t.sortOrder),
+}));
+
+export const insertFaqEntryImageSchema = createInsertSchema(faqEntryImages).omit({
+  id: true, createdAt: true,
+});
+export type InsertFaqEntryImage = z.infer<typeof insertFaqEntryImageSchema>;
+export type FaqEntryImage = typeof faqEntryImages.$inferSelect;
