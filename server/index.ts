@@ -484,7 +484,22 @@ console.log('Environment check:', {
 
 // Create PostgreSQL session store for persistent sessions in production
 const PgStore = connectPgSimple(session);
-const sessionPool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
+const sessionPool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false },
+  // Release idle connections after 60s so PgBouncer's server_idle_timeout (600s default)
+  // never silently kills a connection the pool thinks is alive.
+  idleTimeoutMillis: 60_000,
+  // Hard limit on pool size — prevents connection exhaustion on Supabase's pooler.
+  max: 10,
+  // TCP keepalive so the OS detects dead connections rather than hanging indefinitely.
+  keepAlive: true,
+  keepAliveInitialDelayMillis: 10_000,
+});
+// Surface pool-level errors (dead connection, DNS failure, etc.) without crashing.
+sessionPool.on("error", (err) => {
+  console.error("[SessionPool] idle client error:", err.message);
+});
 
 app.use(
   session({
