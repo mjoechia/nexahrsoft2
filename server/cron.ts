@@ -79,30 +79,35 @@ async function autoGeneratePreviousMonthPayroll(): Promise<void> {
   }
 }
 
+// Node.js setTimeout overflows and fires immediately when delay > 2^31-1 ms (~24.8 days).
+// Cap each wake-up at 24h and re-evaluate — safe for any month gap.
+const MAX_TIMEOUT_MS = 24 * 60 * 60 * 1000;
+
 function scheduleNextMonthlyPayrollRun(): void {
-  // Compute 1st of next month at 01:00 SGT expressed as UTC.
-  // new Date(year, month, day, hour) uses LOCAL server time (UTC on Railway) — not SGT.
-  // We must calculate the UTC equivalent explicitly to avoid up to 8h drift.
   const sg = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Singapore" }));
   const year = sg.getFullYear();
-  const month = sg.getMonth(); // 0-based current month in SGT
+  const month = sg.getMonth();
 
   // 01:00 SGT = (01 - 8) = -7 → Date.UTC normalises to previous day 17:00 UTC ✓
   const nextUTC = new Date(Date.UTC(
     month === 11 ? year + 1 : year,
     month === 11 ? 0 : month + 1,
     1,
-    -7, // 01:00 SGT − 08:00 offset
-    0, 0
+    -7, 0, 0
   ));
 
   const delay = nextUTC.getTime() - Date.now();
+  if (delay > MAX_TIMEOUT_MS) {
+    // Too far away — sleep 24h then re-evaluate so we never overflow setTimeout.
+    setTimeout(scheduleNextMonthlyPayrollRun, MAX_TIMEOUT_MS);
+    return;
+  }
+
+  console.log(`[Cron] Next payroll auto-generation scheduled: ${nextUTC.toISOString()} (= 01:00 SGT)`);
   setTimeout(async () => {
     await autoGeneratePreviousMonthPayroll();
     scheduleNextMonthlyPayrollRun();
-  }, delay);
-
-  console.log(`[Cron] Next payroll auto-generation scheduled: ${nextUTC.toISOString()} (= 01:00 SGT)`);
+  }, Math.max(0, delay));
 }
 
 // ---------------------------------------------------------------------------
@@ -172,12 +177,16 @@ function scheduleNextMonthlyMcResetRun(): void {
   ));
 
   const delay = nextUTC.getTime() - Date.now();
+  if (delay > MAX_TIMEOUT_MS) {
+    setTimeout(scheduleNextMonthlyMcResetRun, MAX_TIMEOUT_MS);
+    return;
+  }
+
+  console.log(`[Cron] Next monthly leave job scheduled: ${nextUTC.toISOString()} (= 00:05 SGT)`);
   setTimeout(async () => {
     await monthlyLeaveJob("cron");
     scheduleNextMonthlyMcResetRun();
-  }, delay);
-
-  console.log(`[Cron] Next monthly leave job scheduled: ${nextUTC.toISOString()} (= 00:05 SGT)`);
+  }, Math.max(0, delay));
 }
 
 // ---------------------------------------------------------------------------
