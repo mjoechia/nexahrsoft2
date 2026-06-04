@@ -583,6 +583,16 @@ app.use((req, res, next) => {
   next();
 });
 
+// Keep the process alive on unexpected errors — log and continue rather than crash.
+// Railway will restart the container on a true fatal, but these catch transient errors
+// (e.g. a stray unhandled rejection in a background task) that don't need a full restart.
+process.on("uncaughtException", (err) => {
+  console.error("[Process] uncaughtException — continuing:", err);
+});
+process.on("unhandledRejection", (reason) => {
+  console.error("[Process] unhandledRejection — continuing:", reason);
+});
+
 (async () => {
   // Serve uploaded files (logos, favicons, etc.) as static assets
   const uploadsDir = path.join(process.cwd(), "dist", "public", "uploads");
@@ -602,9 +612,12 @@ app.use((req, res, next) => {
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";
-
-    res.status(status).json({ message });
-    throw err;
+    console.error("[Express] Unhandled route error:", err);
+    if (!res.headersSent) {
+      res.status(status).json({ message });
+    }
+    // Do NOT re-throw — throwing inside an Express error handler becomes an
+    // uncaught exception that crashes the process.
   });
 
   // importantly only setup vite in development and after
