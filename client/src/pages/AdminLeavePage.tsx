@@ -192,6 +192,7 @@ export default function AdminLeavePage() {
       toast({ title: "Leave application reviewed" });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/leave/applications"] });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/leave/balances"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/attendance/adjustments"] });
       setReviewDialogOpen(false);
       setSelectedApplication(null);
       setReviewComments("");
@@ -595,51 +596,6 @@ export default function AdminLeavePage() {
                     data-testid="button-auto-fill">
                     Recalculate: Eligible = BF + Earned, Balance = Eligible − Taken
                   </Button>
-                </div>
-
-                {/* Accrual Config (per-employee, per-leave-type). Blank = inherit leave-type default. */}
-                <div className="rounded-md border bg-muted/30 p-3 space-y-3">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    Accrual Config
-                  </p>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1">
-                      <Label htmlFor="cfg-monthly" className="text-xs">Monthly Increment</Label>
-                      <Input id="cfg-monthly" type="number" min="0" step="0.5" placeholder="—"
-                        value={cfgMonthlyIncrement} onChange={(e) => setCfgMonthlyIncrement(e.target.value)}
-                        data-testid="input-cfg-monthly" />
-                    </div>
-                    <div className="space-y-1">
-                      <Label htmlFor="cfg-annual" className="text-xs">Annual Allowance</Label>
-                      <Input id="cfg-annual" type="number" min="0" step="0.5" placeholder="—"
-                        value={cfgAnnualAllowance} onChange={(e) => setCfgAnnualAllowance(e.target.value)}
-                        data-testid="input-cfg-annual" />
-                    </div>
-                    {/* Max Balance field removed — Annual Allowance now serves as both the reset value and the cap */}
-                  </div>
-                  <Button type="button" variant="default" size="sm" className="w-full"
-                    onClick={() => {
-                      const annual = parseFloat(cfgAnnualAllowance);
-                      if (!annual || annual <= 0) {
-                        toast({ title: "Set Annual Allowance first", description: "Enter a positive value before granting.", variant: "destructive" });
-                        return;
-                      }
-                      // Grant the full annual allowance as Earned for this year. Recompute Eligible
-                      // and Balance from BF + Earned − Taken so admins still see the components.
-                      setEarnedDays(String(annual));
-                      const bf = parseFloat(bfDays) || 0;
-                      const taken = parseFloat(takenDays) || 0;
-                      const eligible = bf + annual;
-                      setEligibleDays(String(eligible));
-                      setBalanceDays(String(eligible - taken));
-                      toast({ title: "Balance fields updated", description: `Earned set to ${annual.toFixed(1)}. Review and Save.` });
-                    }}
-                    data-testid="button-grant-annual">
-                    Grant annual allowance as current balance now
-                  </Button>
-                  <p className="text-xs text-muted-foreground">
-                    Leave a field blank to inherit the leave-type default.
-                  </p>
                 </div>
 
                 <Button onClick={handleSetBalance} disabled={setBalanceMutation.isPending || isViewOnlyAdmin || !selectedUserId || !leaveType}

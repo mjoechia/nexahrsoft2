@@ -46,7 +46,9 @@ export interface IStorage {
   updateAttendanceAdjustment(id: string, updates: Partial<AttendanceAdjustment>): Promise<AttendanceAdjustment | undefined>;
   deleteAttendanceAdjustment(id: string): Promise<void>;
   getAttendanceAdjustmentsByDateRange(startDate: string, endDate: string): Promise<AttendanceAdjustment[]>;
-  
+  createAttendanceAdjustmentsForLeave(userId: string, startDate: string, endDate: string, leaveType: string, dayType: string, createdBy: string): Promise<number>;
+  deleteAttendanceAdjustmentsForDateRange(userId: string, startDate: string, endDate: string): Promise<number>;
+
   // Employee monthly remarks methods
   upsertEmployeeMonthlyRemark(remark: InsertEmployeeMonthlyRemark): Promise<EmployeeMonthlyRemark>;
   getEmployeeMonthlyRemarks(year: number, month: number): Promise<EmployeeMonthlyRemark[]>;
@@ -511,6 +513,14 @@ export class MemStorage implements IStorage {
   }
 
   async getAttendanceAdjustmentsByDateRange(startDate: string, endDate: string): Promise<AttendanceAdjustment[]> {
+    throw new Error("MemStorage attendance adjustment not implemented");
+  }
+
+  async createAttendanceAdjustmentsForLeave(_userId: string, _startDate: string, _endDate: string, _leaveType: string, _dayType: string, _createdBy: string): Promise<number> {
+    throw new Error("MemStorage attendance adjustment not implemented");
+  }
+
+  async deleteAttendanceAdjustmentsForDateRange(_userId: string, _startDate: string, _endDate: string): Promise<number> {
     throw new Error("MemStorage attendance adjustment not implemented");
   }
 
@@ -1289,6 +1299,48 @@ export class PgStorage implements IStorage {
           lte(attendanceAdjustments.date, endDate)
         )
       );
+  }
+
+  async createAttendanceAdjustmentsForLeave(
+    userId: string, startDate: string, endDate: string,
+    leaveType: string, dayType: string, createdBy: string
+  ): Promise<number> {
+    const regularHours = dayType !== "full" ? 4.5 : 9;
+    const rows: InsertAttendanceAdjustment[] = [];
+    const cursor = new Date(startDate + "T00:00:00");
+    const end    = new Date(endDate   + "T00:00:00");
+    while (cursor <= end) {
+      rows.push({
+        userId,
+        date: cursor.toISOString().slice(0, 10),
+        adjustmentType: "leave",
+        leaveType,
+        regularHours,
+        createdBy,
+      });
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    if (rows.length === 0) return 0;
+    const inserted = await db.insert(attendanceAdjustments)
+      .values(rows)
+      .onConflictDoNothing()
+      .returning({ id: attendanceAdjustments.id });
+    return inserted.length;
+  }
+
+  async deleteAttendanceAdjustmentsForDateRange(
+    userId: string, startDate: string, endDate: string
+  ): Promise<number> {
+    const deleted = await db.delete(attendanceAdjustments)
+      .where(
+        and(
+          eq(attendanceAdjustments.userId, userId),
+          gte(attendanceAdjustments.date, startDate),
+          lte(attendanceAdjustments.date, endDate)
+        )
+      )
+      .returning({ id: attendanceAdjustments.id });
+    return deleted.length;
   }
 
   // Employee monthly remarks methods

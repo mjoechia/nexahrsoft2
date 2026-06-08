@@ -4143,6 +4143,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
           // No floor — MC may go negative (clamped to 0 by monthly cron); other types only got here with sufficient balance at submit time
           await storage.updateLeaveBalanceTaken(balance.id, String(newTaken), String(newBalance));
         }
+
+        // Auto-create attendance adjustments so the heatmap reflects the leave
+        try {
+          await storage.createAttendanceAdjustmentsForLeave(
+            application.userId,
+            application.startDate,
+            application.endDate,
+            application.leaveType,
+            application.dayType ?? "full",
+            adminId,
+          );
+        } catch (adjErr) {
+          console.error("[leave approval] Failed to create attendance adjustments:", adjErr);
+        }
+      }
+
+      if (data.status === "rejected") {
+        // Remove any auto-created (or manual) adjustments for the date range so the heatmap reverts
+        try {
+          await storage.deleteAttendanceAdjustmentsForDateRange(
+            application.userId,
+            application.startDate,
+            application.endDate,
+          );
+        } catch (adjErr) {
+          console.error("[leave rejection] Failed to delete attendance adjustments:", adjErr);
+        }
       }
 
       const updated = await storage.updateLeaveApplication(id, {
