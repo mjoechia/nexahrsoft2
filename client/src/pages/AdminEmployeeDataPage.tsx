@@ -1011,7 +1011,7 @@ export default function AdminEmployeeDataPage() {
                 <h3 className="text-sm font-medium text-muted-foreground mb-3">Basic Information</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="edit-name">Name</Label>
+                    <Label htmlFor="edit-name">Name *</Label>
                     <Input
                       id="edit-name"
                       value={editFormData.name}
@@ -1020,7 +1020,7 @@ export default function AdminEmployeeDataPage() {
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="edit-email">Email</Label>
+                    <Label htmlFor="edit-email">Email *</Label>
                     <Input
                       id="edit-email"
                       type="email"

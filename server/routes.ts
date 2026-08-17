@@ -1265,7 +1265,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!oldUser) {
         return res.status(404).json({ message: "User not found" });
       }
-      
+
+      // Pre-check: if email is being changed, ensure it's not already in use by another user
+      if (updates.email && oldUser.email?.toLowerCase() !== updates.email.toLowerCase()) {
+        const existingUser = await storage.getUserByEmail(updates.email.toLowerCase());
+        if (existingUser && existingUser.id !== id) {
+          return res.status(409).json({ message: "This email address is already in use by another employee." });
+        }
+      }
+
       let user = await storage.updateUser(id, updates);
 
       if (!user) {
@@ -1319,6 +1327,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid input data", errors: error.errors });
       }
+
+      // Handle Postgres unique constraint violations (code 23505)
+      if (error instanceof Error && (error as any).code === "23505") {
+        const constraintMessages: Record<string, string> = {
+          users_email_key: "This email address is already in use by another employee.",
+          users_username_key: "This username is already in use by another employee.",
+        };
+        const message = constraintMessages[(error as any).constraint] ?? "A user with one of these values already exists.";
+        return res.status(409).json({ message });
+      }
+
       res.status(500).json({ message: "Failed to update user" });
     }
   });

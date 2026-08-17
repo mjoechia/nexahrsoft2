@@ -448,13 +448,16 @@ async function ensureSchemaMigrations(pool: Pool) {
       console.log("leave_history user_id column already exists");
     }
 
-    // Add unique constraint on payroll_records to prevent duplicate generation (race-safe)
+    // Add unique constraint on payroll_records to prevent duplicate generation (race-safe, idempotent)
     await pool.query(`
       DO $$ BEGIN
-        ALTER TABLE payroll_records
-          ADD CONSTRAINT payroll_records_unique_employee_period
-          UNIQUE (user_id, pay_period_year, pay_period_month);
-      EXCEPTION WHEN duplicate_object THEN NULL;
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint WHERE conname = 'payroll_records_unique_employee_period'
+        ) THEN
+          ALTER TABLE payroll_records
+            ADD CONSTRAINT payroll_records_unique_employee_period
+            UNIQUE (user_id, pay_period_year, pay_period_month);
+        END IF;
       END $$;
     `);
     console.log("payroll_records unique constraint ready");

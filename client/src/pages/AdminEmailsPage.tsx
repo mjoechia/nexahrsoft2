@@ -1095,7 +1095,7 @@ export default function AdminEmailsPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="edit-name">Full Name</Label>
+                <Label htmlFor="edit-name">Full Name *</Label>
                 <Input
                   id="edit-name"
                   value={editForm.name || ""}
@@ -1104,7 +1104,7 @@ export default function AdminEmailsPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="edit-email">Email Address</Label>
+                <Label htmlFor="edit-email">Email Address *</Label>
                 <Input
                   id="edit-email"
                   type="email"
