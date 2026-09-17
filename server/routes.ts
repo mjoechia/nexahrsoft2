@@ -2843,7 +2843,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         userId: z.string().uuid(),
         date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
         adjustmentType: z.enum(["leave", "hours"]),
-        leaveType: z.enum(["AL", "MC", "ML", "CL", "OIL", "HDL"]).optional().nullable(),
+        leaveType: z.string().optional().nullable(),
         regularHours: z.number().min(0).max(24).optional().nullable(),
         otHours: z.number().min(0).max(24).optional().nullable(),
         clockInTime:  z.string().regex(timeRe, "clockInTime must be HH:mm").optional().nullable(),
@@ -2861,10 +2861,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if ((clockInTime && !clockOutTime) || (!clockInTime && clockOutTime)) {
         return res.status(400).json({ message: "Both clock-in and clock-out times must be provided together." });
       }
-      
+
       // Validate leave type is provided for leave adjustments
       if (adjustmentType === "leave" && !leaveType) {
         return res.status(400).json({ message: "Leave type is required for leave adjustments" });
+      }
+
+      // Validate leave type against the live, admin-configurable leave types list
+      // (not a hardcoded enum) so newly added leave types work here immediately.
+      if (adjustmentType === "leave" && leaveType) {
+        const activeLeaveTypes = await storage.getActiveLeaveTypes();
+        const validCodes = new Set(activeLeaveTypes.map((t) => t.code));
+        if (!validCodes.has(leaveType)) {
+          return res.status(400).json({
+            message: `Unknown or inactive leave type "${leaveType}". Valid options: ${Array.from(validCodes).join(", ")}`,
+          });
+        }
       }
       
       // Get admin user ID - handle master admin case
