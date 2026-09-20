@@ -20,7 +20,12 @@ import {
 import { Plus, Pencil, Trash2, Loader2, Tag, Users, History, Play } from "lucide-react";
 import type { LeaveTypeRow, EmployeeLeaveAccrualOverride, LeaveAccrualRun, User } from "@shared/schema";
 
-const STRATEGY_LABELS: Record<string, string> = { flat: "Flat", tenure_al: "AL Tenure" };
+const STRATEGY_LABELS: Record<string, string> = {
+  monthly_fixed: "Flat",
+  monthly_tenure: "AL Tenure",
+  annual_reset: "Annual Reset",
+  manual_only: "Manual Only",
+};
 
 export function LeaveTypesManager() {
   const { toast } = useToast();
@@ -59,11 +64,12 @@ export function LeaveTypesManager() {
   const [tActive, setTActive] = useState(true);
   const [tInitial, setTInitial] = useState("0");
   const [tMonthly, setTMonthly] = useState("0");
-  const [tStrategy, setTStrategy] = useState<"flat" | "tenure_al">("flat");
+  type AccrualStrategy = "monthly_fixed" | "monthly_tenure" | "annual_reset" | "manual_only";
+  const [tStrategy, setTStrategy] = useState<AccrualStrategy>("monthly_fixed");
 
   const resetTypeForm = () => {
     setTCode(""); setTLabel(""); setTActive(true); setTInitial("0");
-    setTMonthly("0"); setTStrategy("flat"); setEditingType(null);
+    setTMonthly("0"); setTStrategy("monthly_fixed"); setEditingType(null);
   };
 
   const openCreateType = () => { resetTypeForm(); setTypeDialogOpen(true); };
@@ -74,7 +80,7 @@ export function LeaveTypesManager() {
     setTActive(t.isActive);
     setTInitial(String(t.initialBalance));
     setTMonthly(String(t.monthlyAccrual));
-    setTStrategy(t.accrualStrategy as "flat" | "tenure_al");
+    setTStrategy(t.accrualStrategy as AccrualStrategy);
     setTypeDialogOpen(true);
   };
 
@@ -237,7 +243,7 @@ export function LeaveTypesManager() {
                     </TableCell>
                     <TableCell className="text-right">{Number(t.initialBalance).toFixed(2)}</TableCell>
                     <TableCell className="text-right">
-                      {t.accrualStrategy === "tenure_al" ? "auto" : Number(t.monthlyAccrual).toFixed(2)}
+                      {t.accrualStrategy === "monthly_tenure" ? "auto" : Number(t.monthlyAccrual).toFixed(2)}
                     </TableCell>
                     <TableCell>
                       <Badge variant="outline">{STRATEGY_LABELS[t.accrualStrategy] || t.accrualStrategy}</Badge>
@@ -393,17 +399,19 @@ export function LeaveTypesManager() {
               <div className="space-y-2">
                 <Label htmlFor="t-monthly">Monthly Accrual</Label>
                 <Input id="t-monthly" type="number" step="0.01" min="0" value={tMonthly} onChange={(e) => setTMonthly(e.target.value)}
-                  disabled={tStrategy === "tenure_al"} />
-                <p className="text-xs text-muted-foreground">{tStrategy === "tenure_al" ? "Auto from join_date" : "Days added per month"}</p>
+                  disabled={tStrategy === "monthly_tenure"} />
+                <p className="text-xs text-muted-foreground">{tStrategy === "monthly_tenure" ? "Auto from join_date" : "Days added per month"}</p>
               </div>
             </div>
             <div className="space-y-2">
               <Label htmlFor="t-strategy">Accrual Strategy</Label>
-              <Select value={tStrategy} onValueChange={(v) => setTStrategy(v as "flat" | "tenure_al")}>
+              <Select value={tStrategy} onValueChange={(v) => setTStrategy(v as AccrualStrategy)}>
                 <SelectTrigger id="t-strategy"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="flat">Flat (use Monthly Accrual value)</SelectItem>
-                  <SelectItem value="tenure_al">AL Tenure (auto from join_date, 7→14)</SelectItem>
+                  <SelectItem value="monthly_fixed">Flat (use Monthly Accrual value)</SelectItem>
+                  <SelectItem value="monthly_tenure">AL Tenure (auto from join_date, 7→14)</SelectItem>
+                  <SelectItem value="annual_reset">Annual Reset (set once in January)</SelectItem>
+                  <SelectItem value="manual_only">Manual Only (no auto-accrual)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
