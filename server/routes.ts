@@ -9145,7 +9145,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         isActive: z.boolean().optional().default(true),
         initialBalance: z.number().min(0),
         monthlyAccrual: z.number().min(0),
-        accrualStrategy: z.enum(["flat", "tenure_al"]).default("flat"),
+        accrualStrategy: z.enum(["monthly_fixed", "monthly_tenure", "annual_reset", "manual_only"]).default("monthly_fixed"),
         sortOrder: z.number().int().optional().default(0),
       });
       const data = schema.parse(req.body);
@@ -9180,7 +9180,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         isActive: z.boolean().optional(),
         initialBalance: z.number().min(0).optional(),
         monthlyAccrual: z.number().min(0).optional(),
-        accrualStrategy: z.enum(["flat", "tenure_al"]).optional(),
+        accrualStrategy: z.enum(["monthly_fixed", "monthly_tenure", "annual_reset", "manual_only"]).optional(),
         sortOrder: z.number().int().optional(),
       });
       const data = schema.parse(req.body);
