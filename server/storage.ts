@@ -1321,11 +1321,28 @@ export class PgStorage implements IStorage {
       cursor.setDate(cursor.getDate() + 1);
     }
     if (rows.length === 0) return 0;
-    const inserted = await db.insert(attendanceAdjustments)
+    // Upsert on (userId, date): a day already carrying an adjustment (e.g. a
+    // previously-approved AL application) must be overwritten when a later
+    // application (e.g. MC) is approved for the same date — otherwise the
+    // stale leave type silently survives and the attendance heatmap keeps
+    // showing the old type even though the new one is now the approved one.
+    const upserted = await db.insert(attendanceAdjustments)
       .values(rows)
-      .onConflictDoNothing()
+      .onConflictDoUpdate({
+        target: [attendanceAdjustments.userId, attendanceAdjustments.date],
+        set: {
+          adjustmentType: sql`excluded.adjustment_type`,
+          leaveType: sql`excluded.leave_type`,
+          regularHours: sql`excluded.regular_hours`,
+          otHours: sql`excluded.ot_hours`,
+          clockInTime: sql`excluded.clock_in_time`,
+          clockOutTime: sql`excluded.clock_out_time`,
+          createdBy: sql`excluded.created_by`,
+          updatedAt: new Date(),
+        },
+      })
       .returning({ id: attendanceAdjustments.id });
-    return inserted.length;
+    return upserted.length;
   }
 
   async deleteAttendanceAdjustmentsForDateRange(
