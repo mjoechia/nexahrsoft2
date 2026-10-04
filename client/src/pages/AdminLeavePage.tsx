@@ -181,6 +181,17 @@ export default function AdminLeavePage() {
     }
   }, [selectedUserId, leaveType, balances]);
 
+  // Auto-recompute Balance = Eligible − Taken whenever either changes.
+  // Balance stays directly editable (e.g. for a one-off correction that
+  // doesn't follow the formula) — this effect only re-fires when Eligible
+  // or Taken themselves change, so a manual Balance edit is left alone
+  // until the admin touches one of those two fields again.
+  useEffect(() => {
+    const eligible = parseFloat(eligibleDays) || 0;
+    const taken = parseFloat(takenDays) || 0;
+    setBalanceDays(String(eligible - taken));
+  }, [eligibleDays, takenDays]);
+
   const reviewMutation = useMutation({
     mutationFn: async ({ applicationId, status, approvedDays }: { applicationId: string; status: "approved" | "rejected"; approvedDays?: number }) =>
       apiRequest("PATCH", `/api/admin/leave/applications/${applicationId}`, {
@@ -555,7 +566,7 @@ export default function AdminLeavePage() {
                 {/* All 5 balance fields editable. Values are prefilled from the existing row when present. */}
                 <div className="rounded-md border bg-muted/30 p-3 space-y-3">
                   <p className="text-xs text-muted-foreground">
-                    <strong>Eligible</strong> = Brought Forward + Earned. <strong>Balance</strong> = Eligible − Taken. Edit any field directly — the app does not auto-recompute.
+                    <strong>Eligible</strong> = Brought Forward + Earned (use Recalculate below, or type Eligible directly). <strong>Balance</strong> = Eligible − Taken, and updates automatically whenever you change Eligible or Taken. You can still type a custom Balance directly for a one-off correction — it will only be overwritten again if you change Eligible or Taken afterward.
                   </p>
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1">
@@ -588,13 +599,12 @@ export default function AdminLeavePage() {
                     onClick={() => {
                       const bf = parseFloat(bfDays) || 0;
                       const earned = parseFloat(earnedDays) || 0;
-                      const taken = parseFloat(takenDays) || 0;
-                      const eligible = bf + earned;
-                      setEligibleDays(String(eligible));
-                      setBalanceDays(String(eligible - taken));
+                      setEligibleDays(String(bf + earned));
+                      // Balance recomputes automatically from the effect above
+                      // once Eligible changes — no need to set it here too.
                     }}
                     data-testid="button-auto-fill">
-                    Recalculate: Eligible = BF + Earned, Balance = Eligible − Taken
+                    Recalculate Eligible: Brought Forward + Earned
                   </Button>
                 </div>
 
