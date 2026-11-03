@@ -176,9 +176,11 @@ const ADMIN_CREDENTIALS = {
   password: "jc123!",
 };
 
-// Super admin emails - only these users can archive/unarchive employees
+// Super admin emails - only these users can archive/unarchive employees,
+// delete employees, and manage other admins' sub-roles
 const SUPER_ADMIN_EMAILS = [
   "rebekah.sr@3si.com.sg",
+  "apaccounts@3si.com.sg",
 ];
 
 // Helper function to check if current session is a super admin
