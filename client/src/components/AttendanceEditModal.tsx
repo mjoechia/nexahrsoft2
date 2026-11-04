@@ -186,13 +186,6 @@ export function AttendanceEditModal({
         </DialogHeader>
 
         <div className="space-y-4 py-4">
-          <div className="bg-muted/50 p-3 rounded-md text-sm">
-            <div className="flex items-center gap-2 text-muted-foreground">
-              <Clock className="h-4 w-4" />
-              <span>Actual clocked hours: <strong className="text-foreground">{actualHours.toFixed(1)} hrs</strong></span>
-            </div>
-          </div>
-
           <div className="space-y-3">
             <Label>Adjustment Type</Label>
             <RadioGroup
@@ -329,48 +322,57 @@ export function AttendanceEditModal({
           </div>
         </div>
 
-        <div className="flex flex-row items-center justify-between gap-3 pt-4 border-t mt-2">
-          <div className="flex-shrink-0">
-            {existingAdjustment && (
+        <div className="pt-4 border-t mt-2 space-y-3">
+          <div className="bg-muted/50 p-3 rounded-md text-sm">
+            <div className="flex items-center gap-2 text-muted-foreground">
+              <Clock className="h-4 w-4" />
+              <span>Actual clocked hours: <strong className="text-foreground">{actualHours.toFixed(1)} hrs</strong></span>
+            </div>
+          </div>
+
+          <div className="flex flex-row items-center justify-between gap-3">
+            <div className="flex-shrink-0">
+              {existingAdjustment && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleDelete}
+                  disabled={deleteMutation.isPending || saveMutation.isPending}
+                  className="text-destructive hover:text-destructive"
+                  data-testid="button-delete-adjustment"
+                >
+                  {deleteMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  ) : (
+                    <Trash2 className="h-4 w-4 mr-2" />
+                  )}
+                  Revert to Actual
+                </Button>
+              )}
+            </div>
+            <div className="flex gap-2 flex-shrink-0">
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
-                onClick={handleDelete}
-                disabled={deleteMutation.isPending || saveMutation.isPending}
-                className="text-destructive hover:text-destructive"
-                data-testid="button-delete-adjustment"
+                onClick={() => onOpenChange(false)}
+                disabled={saveMutation.isPending || deleteMutation.isPending}
+                data-testid="button-cancel"
               >
-                {deleteMutation.isPending ? (
-                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                ) : (
-                  <Trash2 className="h-4 w-4 mr-2" />
-                )}
-                Revert to Actual
+                Cancel
               </Button>
-            )}
-          </div>
-          <div className="flex gap-2 flex-shrink-0">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => onOpenChange(false)}
-              disabled={saveMutation.isPending || deleteMutation.isPending}
-              data-testid="button-cancel"
-            >
-              Cancel
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              onClick={handleSave}
-              disabled={saveMutation.isPending || deleteMutation.isPending}
-              data-testid="button-save-adjustment"
-            >
-              {saveMutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
-              Save Adjustment
-            </Button>
+              <Button
+                type="button"
+                size="sm"
+                onClick={handleSave}
+                disabled={saveMutation.isPending || deleteMutation.isPending}
+                data-testid="button-save-adjustment"
+              >
+                {saveMutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                Save Adjustment
+              </Button>
+            </div>
           </div>
         </div>
       </DialogContent>
