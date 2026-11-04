@@ -185,7 +185,7 @@ export function AttendanceEditModal({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 py-4">
+        <div className="space-y-4">
           <div className="space-y-3">
             <Label>Adjustment Type</Label>
             <RadioGroup
@@ -322,7 +322,7 @@ export function AttendanceEditModal({
           </div>
         </div>
 
-        <div className="pt-4 border-t mt-2 space-y-3">
+        <div className="pt-3 border-t space-y-3">
           <div className="bg-muted/50 p-3 rounded-md text-sm">
             <div className="flex items-center gap-2 text-muted-foreground">
               <Clock className="h-4 w-4" />
