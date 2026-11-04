@@ -169,7 +169,7 @@ export function AttendanceEditModal({
 
   const formatDate = (dateStr: string) => {
     const d = new Date(dateStr);
-    return d.toLocaleDateString("en-SG", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+    return d.toLocaleDateString("en-SG", { year: "numeric", month: "short", day: "numeric" });
   };
 
   return (
@@ -180,8 +180,8 @@ export function AttendanceEditModal({
             <Calendar className="h-5 w-5" />
             Edit Attendance
           </DialogTitle>
-          <DialogDescription>
-            Adjust attendance for {userName} on {formatDate(date)}
+          <DialogDescription className="whitespace-nowrap overflow-hidden text-ellipsis">
+            {userName} · {formatDate(date)}
           </DialogDescription>
         </DialogHeader>
 
@@ -316,7 +316,7 @@ export function AttendanceEditModal({
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               placeholder="Reason for adjustment..."
-              rows={2}
+              rows={1}
               data-testid="input-notes"
             />
           </div>
