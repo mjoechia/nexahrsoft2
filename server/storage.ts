@@ -81,6 +81,11 @@ export interface IStorage {
   getLeaveBalance(userId: string, leaveType: string, year: number): Promise<LeaveBalance | undefined>;
   getUserLeaveBalances(userId: string, year: number): Promise<LeaveBalance[]>;
   getAllLeaveBalances(year?: number): Promise<LeaveBalance[]>;
+  syncLeaveBalancesFromAttendanceAdjustments(year: number): Promise<{
+    synced: number;
+    skippedNoEligible: number;
+    skippedEntries: { userId: string; employeeName: string; leaveType: string }[];
+  }>;
   updateLeaveBalanceTaken(id: string, taken: string, balance: string): Promise<LeaveBalance | undefined>;
   
   createLeaveApplication(application: InsertLeaveApplication): Promise<LeaveApplication>;
@@ -617,6 +622,14 @@ export class MemStorage implements IStorage {
   }
 
   async getAllLeaveBalances(year?: number): Promise<LeaveBalance[]> {
+    throw new Error("MemStorage leave not implemented");
+  }
+
+  async syncLeaveBalancesFromAttendanceAdjustments(year: number): Promise<{
+    synced: number;
+    skippedNoEligible: number;
+    skippedEntries: { userId: string; employeeName: string; leaveType: string }[];
+  }> {
     throw new Error("MemStorage leave not implemented");
   }
 
@@ -1624,6 +1637,84 @@ export class PgStorage implements IStorage {
       return await query.where(eq(leaveBalances.year, year)).orderBy(leaveBalances.userId, leaveBalances.leaveType);
     }
     return await query.orderBy(leaveBalances.userId, leaveBalances.leaveType);
+  }
+
+  // Aggregates attendance_adjustments (adjustmentType='leave') for the given
+  // year into leave_balances.taken/balance, per (userId, leaveType). This is
+  // for admins who record leave via "Edit Attendance" (one day at a time,
+  // visible on the heatmap) rather than the Leave Application flow — that
+  // path never touches leave_balances, so Taken/Balance silently stay at
+  // whatever they were before, however much attendance data is entered.
+  //
+  // Same safety rule as the leave-history import sync: a leaveType the
+  // employee has no existing leave_balances row for (Eligible never set)
+  // is skipped rather than written with Eligible defaulted to 0, which
+  // would produce a misleading negative "balance".
+  async syncLeaveBalancesFromAttendanceAdjustments(year: number): Promise<{
+    synced: number;
+    skippedNoEligible: number;
+    skippedEntries: { userId: string; employeeName: string; leaveType: string }[];
+  }> {
+    const startDate = `${year}-01-01`;
+    const endDate = `${year}-12-31`;
+
+    const rows = await db.select()
+      .from(attendanceAdjustments)
+      .where(
+        and(
+          eq(attendanceAdjustments.adjustmentType, "leave"),
+          gte(attendanceAdjustments.date, startDate),
+          lte(attendanceAdjustments.date, endDate)
+        )
+      );
+
+    // Group by (userId, leaveType); sum regularHours and convert to days
+    // using the same "9 regular hours = 1 day (4.5 = half day)" convention
+    // the Edit Attendance modal itself uses when writing these rows.
+    const groups = new Map<string, { userId: string; leaveType: string; totalHours: number }>();
+    for (const row of rows) {
+      if (!row.leaveType) continue;
+      const key = `${row.userId}||${row.leaveType}`;
+      const g = groups.get(key) || { userId: row.userId, leaveType: row.leaveType, totalHours: 0 };
+      g.totalHours += row.regularHours || 0;
+      groups.set(key, g);
+    }
+
+    let synced = 0;
+    let skippedNoEligible = 0;
+    const skippedEntries: { userId: string; employeeName: string; leaveType: string }[] = [];
+
+    for (const g of Array.from(groups.values())) {
+      const totalDays = g.totalHours / 9;
+      const existing = await this.getLeaveBalance(g.userId, g.leaveType, year);
+      if (!existing) {
+        skippedNoEligible++;
+        const user = await this.getUser(g.userId);
+        skippedEntries.push({ userId: g.userId, employeeName: user?.name || g.userId, leaveType: g.leaveType });
+        continue;
+      }
+
+      const bf = parseFloat(existing.broughtForward || "0");
+      const earned = parseFloat(existing.earned || "0");
+      const eligible = parseFloat(existing.eligible || "0");
+      const computedBalance = eligible - totalDays;
+
+      await this.createOrUpdateLeaveBalance({
+        userId: g.userId,
+        leaveType: g.leaveType,
+        year,
+        taken: totalDays.toFixed(2),
+        balance: computedBalance.toFixed(2),
+        broughtForward: bf.toFixed(2),
+        earned: earned.toFixed(2),
+        eligible: eligible.toFixed(2),
+        employeeCode: existing.employeeCode || undefined,
+        employeeName: existing.employeeName,
+      });
+      synced++;
+    }
+
+    return { synced, skippedNoEligible, skippedEntries };
   }
 
   async updateLeaveBalanceTaken(id: string, taken: string, balance: string): Promise<LeaveBalance | undefined> {

@@ -5,7 +5,7 @@ import { toTitleCase } from "@/lib/utils";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import {
   ArrowLeft, AlertOctagon, AlertTriangle, Hourglass, Users, ArrowRight,
-  CheckCircle, XCircle,
+  CheckCircle, XCircle, RefreshCw, Loader2,
 } from "lucide-react";
 import { Link } from "wouter";
 import type { User, LeaveBalance, LeaveApplication, LeaveTypeRow, EmployeeLeaveTypeConfig } from "@shared/schema";
@@ -160,6 +160,23 @@ export default function AdminLeavePage() {
       }
     },
     onError: (err: Error) => toast({ title: "Failed", description: err.message, variant: "destructive" }),
+  });
+
+  // Recalculates Taken/Balance from attendance_adjustments (leave entered via
+  // Edit Attendance, e.g. on the heatmap) for the current year — that path
+  // never updates leave_balances on its own.
+  const syncFromAttendanceMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/admin/leave/sync-from-attendance", {
+        year: new Date().getFullYear(),
+      });
+      return res.json();
+    },
+    onSuccess: (data: { message: string; synced: number; skippedNoEligible: number }) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/leave/balances"] });
+      toast({ title: "Sync complete", description: data.message });
+    },
+    onError: (err: Error) => toast({ title: "Sync failed", description: err.message, variant: "destructive" }),
   });
 
   // Prefill the 5 balance fields from the existing row whenever (userId, leaveType) is set
@@ -791,10 +808,26 @@ export default function AdminLeavePage() {
         <CardHeader className="space-y-3 pb-3">
           <div className="flex flex-row items-center justify-between gap-3 flex-wrap">
             <CardTitle className="text-lg">Team Snapshot</CardTitle>
-            <p className="text-xs text-muted-foreground">
-              Showing {visibleRows.length === 0 ? 0 : safePage * pageSize + 1}–{safePage * pageSize + visibleRows.length} of {filteredSnapshotRows.length}
-              {snapshotSearch && ` (filtered from ${snapshotRows.length})`}
-            </p>
+            <div className="flex items-center gap-3">
+              <p className="text-xs text-muted-foreground">
+                Showing {visibleRows.length === 0 ? 0 : safePage * pageSize + 1}–{safePage * pageSize + visibleRows.length} of {filteredSnapshotRows.length}
+                {snapshotSearch && ` (filtered from ${snapshotRows.length})`}
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => syncFromAttendanceMutation.mutate()}
+                disabled={syncFromAttendanceMutation.isPending || isViewOnlyAdmin}
+                data-testid="button-sync-from-attendance"
+                title="Recalculate Taken/Balance from leave entered via Edit Attendance (e.g. on the heatmap)"
+              >
+                {syncFromAttendanceMutation.isPending
+                  ? <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  : <RefreshCw className="h-4 w-4 mr-2" />}
+                Sync Taken from Attendance
+              </Button>
+            </div>
           </div>
           <Input
             type="search"

@@ -4118,6 +4118,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Admin: Recalculate Taken/Balance in leave_balances from attendance_adjustments
+  // for a given year. Covers leave entered via "Edit Attendance" (one day at a
+  // time, e.g. on the heatmap) rather than the Leave Application flow — that
+  // path never updates leave_balances on its own.
+  app.post("/api/admin/leave/sync-from-attendance", requireAdmin, requireWriteAccess, requireFullAdmin, async (req: Request, res: Response) => {
+    if (!req.session?.isAdmin) {
+      return res.status(403).json({ message: "Admin access required" });
+    }
+
+    try {
+      const schema = z.object({
+        year: z.number().int().min(2000).max(2100).optional(),
+      });
+      const { year } = schema.parse(req.body);
+      const targetYear = year || new Date().getFullYear();
+
+      const result = await storage.syncLeaveBalancesFromAttendanceAdjustments(targetYear);
+
+      const message = result.skippedNoEligible > 0
+        ? `Synced ${result.synced} balance(s) for ${targetYear}. ${result.skippedNoEligible} employee/leave-type combination(s) have no Eligible days set yet, so Taken/Balance could not be calculated for them — set Eligible first via Adjust, then sync again.`
+        : `Synced ${result.synced} balance(s) for ${targetYear}.`;
+
+      res.json({ success: true, message, ...result });
+    } catch (error: any) {
+      console.error("Sync leave balances from attendance error:", error);
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: error.errors[0].message });
+      }
+      res.status(500).json({ message: "Failed to sync leave balances from attendance" });
+    }
+  });
+
   // Admin: Get all leave applications
   app.get("/api/admin/leave/applications", requireAdmin, requireFullAdmin, async (req: Request, res: Response) => {
     if (!req.session?.isAdmin) {
@@ -4361,7 +4393,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Auto-sync leave history into leave_balances
       // Recompute "taken" from ALL leave_history records per userId/leaveType/year
       // and preserve existing broughtForward/earned/eligible values
-      const syncResults = { synced: 0, errors: 0 };
+      const syncResults = { synced: 0, errors: 0, skippedNoEligible: 0 };
+      const skippedNoEligibleEntries: { employeeName: string; leaveType: string; year: number }[] = [];
       try {
         // Identify unique userId/leaveType/year combos from this import
         const affectedKeys = new Set<string>();
@@ -4400,11 +4433,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
               return sum + days;
             }, 0);
 
-            // Get existing balance to preserve broughtForward/earned/eligible
+            // Get existing balance to preserve broughtForward/earned/eligible.
+            // If no balance row exists yet, Eligible has never been set for this
+            // employee/leaveType/year — do NOT default it to 0 and write a
+            // misleading negative "balance" (0 - taken). Skip the write instead
+            // and tell the admin this employee needs Eligible set up first
+            // (Admin > Leave > Adjust) before a real balance can be shown.
             const existingBalance = await storage.getLeaveBalance(meta.userId, meta.leaveType, meta.year);
-            const bf = existingBalance ? parseFloat(existingBalance.broughtForward || '0') : 0;
-            const earned = existingBalance ? parseFloat(existingBalance.earned || '0') : 0;
-            const eligible = existingBalance ? parseFloat(existingBalance.eligible || '0') : 0;
+            if (!existingBalance) {
+              syncResults.skippedNoEligible++;
+              skippedNoEligibleEntries.push({
+                employeeName: meta.employeeName,
+                leaveType: meta.leaveType,
+                year: meta.year,
+              });
+              continue;
+            }
+
+            const bf = parseFloat(existingBalance.broughtForward || '0');
+            const earned = parseFloat(existingBalance.earned || '0');
+            const eligible = parseFloat(existingBalance.eligible || '0');
             const computedBalance = eligible - totalDays;
 
             await storage.createOrUpdateLeaveBalance({
@@ -4425,7 +4473,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             console.error(`[Leave Import] Balance sync error for ${meta.userId}/${meta.leaveType}/${meta.year}:`, syncErr?.message);
           }
         }
-        console.log(`[Leave Import] Balance sync complete: ${syncResults.synced} synced, ${syncResults.errors} errors`);
+        console.log(`[Leave Import] Balance sync complete: ${syncResults.synced} synced, ${syncResults.skippedNoEligible} skipped (no Eligible set), ${syncResults.errors} errors`);
       } catch (syncError: any) {
         console.error("[Leave Import] Balance sync failed:", syncError?.message);
       }
@@ -4433,14 +4481,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log(`[Leave Import] Complete: ${allCreated.length} records imported (${skippedCount} unmatched skipped), ${failedChunks.length} chunk(s) failed`);
 
       const partialFailure = failedChunks.length > 0;
-      res.json({ 
-        success: true, 
-        message: partialFailure 
+      const eligibleNote = syncResults.skippedNoEligible > 0
+        ? ` ${syncResults.skippedNoEligible} employee/leave-type combination(s) have no Eligible days set yet, so their Taken/Balance could not be calculated — set Eligible first via Admin > Leave > Adjust, then re-run this import.`
+        : "";
+      res.json({
+        success: true,
+        message: (partialFailure
           ? `Imported ${allCreated.length} of ${matchedRecords.length} matched records (${skippedCount} unmatched skipped, ${failedChunks.length} batch(es) failed)`
-          : `Imported ${allCreated.length} matched records (${skippedCount} unmatched skipped). ${syncResults.synced} leave balance entries synced.`,
+          : `Imported ${allCreated.length} matched records (${skippedCount} unmatched skipped). ${syncResults.synced} leave balance entries synced.`) + eligibleNote,
         imported: allCreated.length,
         skipped: skippedCount,
         balancesSynced: syncResults.synced,
+        balancesSkippedNoEligible: syncResults.skippedNoEligible,
+        skippedNoEligibleEntries,
         ...(partialFailure && { failedBatches: failedChunks.length, totalBatches: totalChunks })
       });
     } catch (error: any) {
